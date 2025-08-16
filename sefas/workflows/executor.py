@@ -20,6 +20,8 @@ from sefas.agents.proposers import ProposerAgent, CreativeProposer, AnalyticalPr
 from sefas.agents.checkers import CheckerAgent, LogicChecker, SemanticChecker, ConsistencyChecker
 from sefas.agents.orchestrator import OrchestratorAgent
 from sefas.evolution.belief_propagation import BeliefPropagationEngine
+from sefas.reporting.report_synthesizer import ReportSynthesizer
+from sefas.reporting.final_report import FinalReportGenerator
 
 
 class FederatedSystemRunner:
@@ -46,6 +48,10 @@ class FederatedSystemRunner:
         
         # Initialize belief propagation
         self.belief_engine = BeliefPropagationEngine()
+        
+        # Initialize reporting system
+        self.report_synthesizer = ReportSynthesizer()
+        self.report_generator = FinalReportGenerator()
         
         # Performance tracking
         self.execution_history = []
@@ -166,6 +172,43 @@ class FederatedSystemRunner:
             
             log_performance_metrics(performance_tracker.get_system_summary())
             
+            # Collect all agent reports
+            agent_reports = []
+            for agent_name, agent in self.agents.items():
+                if hasattr(agent, 'get_report'):
+                    report = agent.get_report()
+                    if report:
+                        agent_reports.append(report)
+            
+            # Generate comprehensive synthesis
+            execution_metadata = {
+                'task_id': task_id,
+                'total_time': total_time,
+                'total_api_calls': len(agent_reports),
+                'system_status': 'success'
+            }
+            
+            synthesis = self.report_synthesizer.synthesize(
+                agent_reports,
+                task,
+                execution_metadata
+            )
+            
+            # Generate final reports in multiple formats
+            try:
+                report_files = self.report_generator.generate(
+                    synthesis,
+                    agent_reports,
+                    format="all"
+                )
+                
+                print(f"\n📄 Comprehensive reports generated:")
+                for format_type, filepath in report_files.items():
+                    print(f"  - {format_type.upper()}: {filepath}")
+            except Exception as e:
+                print(f"⚠️ Report generation failed: {e}")
+                report_files = {}
+            
             # Store execution history
             execution_record = {
                 'task_id': task_id,
@@ -177,7 +220,10 @@ class FederatedSystemRunner:
                 'consensus_summary': consensus_summary,
                 'evolution_results': evolution_results,
                 'execution_time': total_time,
-                'tokens_used': total_tokens
+                'tokens_used': total_tokens,
+                'agent_reports': [r.to_json() for r in agent_reports],
+                'synthesis': synthesis,
+                'report_files': report_files
             }
             self.execution_history.append(execution_record)
             
@@ -191,7 +237,10 @@ class FederatedSystemRunner:
                 'verifications': verifications,
                 'evolution_results': evolution_results,
                 'execution_time': total_time,
-                'tokens_used': total_tokens
+                'tokens_used': total_tokens,
+                'agent_reports': agent_reports,
+                'synthesis': synthesis,
+                'reports': report_files
             }
             
         except Exception as e:
@@ -223,6 +272,46 @@ class FederatedSystemRunner:
                 agent_contributions={}
             )
             
+            # Collect partial agent reports for error analysis
+            agent_reports = []
+            for agent_name, agent in self.agents.items():
+                if hasattr(agent, 'get_report'):
+                    report = agent.get_report()
+                    if report:
+                        agent_reports.append(report)
+            
+            # Generate error synthesis
+            execution_metadata = {
+                'task_id': task_id,
+                'total_time': error_time,
+                'total_api_calls': len(agent_reports),
+                'system_status': 'error',
+                'error': str(e),
+                'error_type': type(e).__name__
+            }
+            
+            try:
+                synthesis = self.report_synthesizer.synthesize(
+                    agent_reports,
+                    task,
+                    execution_metadata
+                )
+                
+                # Generate error reports
+                report_files = self.report_generator.generate(
+                    synthesis,
+                    agent_reports,
+                    format="json"  # Only JSON for error reports to avoid HTML issues
+                )
+                
+                print(f"\n⚠️ Error reports generated:")
+                for format_type, filepath in report_files.items():
+                    print(f"  - {format_type.upper()}: {filepath}")
+            except Exception as report_error:
+                print(f"⚠️ Error report generation also failed: {report_error}")
+                synthesis = {}
+                report_files = {}
+            
             # Store partial execution history for debugging
             execution_record = {
                 'task_id': task_id,
@@ -236,7 +325,10 @@ class FederatedSystemRunner:
                 'execution_time': error_time,
                 'tokens_used': partial_tokens,
                 'error': str(e),
-                'error_type': type(e).__name__
+                'error_type': type(e).__name__,
+                'agent_reports': [r.to_json() for r in agent_reports],
+                'synthesis': synthesis,
+                'report_files': report_files
             }
             self.execution_history.append(execution_record)
             
@@ -252,7 +344,10 @@ class FederatedSystemRunner:
                 'error': str(e),
                 'error_type': type(e).__name__,
                 'execution_time': error_time,
-                'tokens_used': partial_tokens
+                'tokens_used': partial_tokens,
+                'agent_reports': agent_reports,
+                'synthesis': synthesis,
+                'reports': report_files
             }
 
     async def _orchestrate_task(self, task_id: str, task: str) -> Dict[str, Any]:

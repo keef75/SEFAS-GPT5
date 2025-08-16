@@ -13,6 +13,7 @@ from langchain.schema import SystemMessage, HumanMessage
 
 from sefas.core.state import EvolutionState
 from sefas.memory.episodic import EpisodicMemory
+from sefas.reporting.agent_reporter import AgentReport
 from config.settings import settings
 import time
 
@@ -61,11 +62,24 @@ class SelfEvolvingAgent(ABC):
         # Performance tracking
         self.performance_history = []
         
+        # Report tracking
+        self.last_report = None
+        self.reasoning_steps = []
+        self.tools_used = []
+        
     def execute(self, task: Dict[str, Any], context: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Execute task with current configuration"""
+        """Execute task with comprehensive reporting"""
+        
+        start_time = time.time()
+        self.reasoning_steps = []  # Reset reasoning for this execution
+        self.tools_used = []       # Reset tools for this execution
+        
+        # Track reasoning steps
+        self.reasoning_steps.append(f"Starting execution for task: {task.get('description', '')[:100]}")
         
         # Build prompt with context
         full_prompt = self._build_prompt(task, context)
+        self.reasoning_steps.append(f"Built prompt with {len(full_prompt)} characters")
         
         # Get response from LLM
         try:
@@ -73,6 +87,8 @@ class SelfEvolvingAgent(ABC):
             if not getattr(settings, 'offline_mode', False):
                 time.sleep(max(0, getattr(settings, 'rate_limit_ms', 200) / 1000.0))
 
+            self.reasoning_steps.append(f"Invoking LLM with model: {getattr(settings, 'llm_model', 'unknown')}")
+            
             response = self.llm.invoke([
                 SystemMessage(content=self.current_prompt),
                 HumanMessage(content=full_prompt)
@@ -80,6 +96,33 @@ class SelfEvolvingAgent(ABC):
             
             # Parse and structure response
             result = self._parse_response(response.content)
+            self.reasoning_steps.append(f"Parsed response with confidence: {result.get('confidence', 0.0):.2%}")
+            
+            # Calculate execution metrics
+            execution_time = time.time() - start_time
+            tokens_used = self._estimate_tokens(response.content)
+            
+            # Generate comprehensive agent report
+            self.last_report = AgentReport(
+                agent_id=self.name,
+                agent_role=self.role,
+                timestamp=datetime.now(),
+                task=task.get('description', 'Unknown task'),
+                input_received=task,
+                reasoning_process=self.reasoning_steps.copy(),
+                output_generated=result,
+                confidence_score=result.get('confidence', 0.5),
+                tokens_used=tokens_used,
+                execution_time=execution_time,
+                memory_accessed=self.memory.get_recent(5),
+                tools_used=self.tools_used.copy(),
+                prompt_version=self.evolution_state.prompt_version,
+                mutations_applied=list(getattr(self.evolution_state, 'mutations_applied', [])),
+                fitness_score=self.evolution_state.fitness_score,
+                verification_results=self._get_verification_results(result) if 'checker' in self.role.lower() else None,
+                issues_found=self._extract_issues(result),
+                recommendations=self._generate_recommendations(result)
+            )
             
             # Add to memory
             self.memory.add({
@@ -136,6 +179,31 @@ class SelfEvolvingAgent(ABC):
                 'proposal': f"Error executing task: {str(e)}",
                 'reasoning': "Agent encountered an error during execution"
             }
+            
+            # Generate error report
+            execution_time = time.time() - start_time
+            self.reasoning_steps.append(f"Error occurred: {str(e)}")
+            
+            self.last_report = AgentReport(
+                agent_id=self.name,
+                agent_role=self.role,
+                timestamp=datetime.now(),
+                task=task.get('description', 'Unknown task'),
+                input_received=task,
+                reasoning_process=self.reasoning_steps.copy(),
+                output_generated=error_result,
+                confidence_score=0.0,
+                tokens_used=0,
+                execution_time=execution_time,
+                memory_accessed=self.memory.get_recent(5),
+                tools_used=self.tools_used.copy(),
+                prompt_version=self.evolution_state.prompt_version,
+                mutations_applied=list(getattr(self.evolution_state, 'mutations_applied', [])),
+                fitness_score=self.evolution_state.fitness_score,
+                verification_results=None,
+                issues_found=[f"Execution error: {str(e)}"],
+                recommendations=["Review agent configuration and API connectivity"]
+            )
             
             # Still add to memory for learning
             self.memory.add({
@@ -286,6 +354,97 @@ class SelfEvolvingAgent(ABC):
                     pass
         
         return 0.5  # Default confidence
+    
+    def get_report(self) -> Optional[AgentReport]:
+        """Get the last execution report"""
+        return self.last_report
+    
+    def _estimate_tokens(self, text: str) -> int:
+        """Estimate token count for text"""
+        # Rough estimation: ~1.3 words per token
+        return int(len(text.split()) * 1.3)
+    
+    def _get_verification_results(self, result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Extract verification results for checker agents"""
+        if 'verification' not in result and 'checks' not in result:
+            return None
+        
+        verification_data = result.get('verification', result.get('checks', {}))
+        
+        # Structure verification results
+        verification_results = {}
+        
+        if isinstance(verification_data, dict):
+            for check_name, check_result in verification_data.items():
+                if isinstance(check_result, bool):
+                    verification_results[check_name] = {
+                        'passed': check_result,
+                        'details': f"Check {'passed' if check_result else 'failed'}"
+                    }
+                elif isinstance(check_result, dict):
+                    verification_results[check_name] = check_result
+                else:
+                    verification_results[check_name] = {
+                        'passed': bool(check_result),
+                        'details': str(check_result)
+                    }
+        
+        return verification_results if verification_results else None
+    
+    def _extract_issues(self, result: Dict[str, Any]) -> List[str]:
+        """Extract issues from agent result"""
+        issues = []
+        
+        # Look for common issue fields
+        issue_fields = ['issues', 'problems', 'errors', 'warnings', 'concerns']
+        
+        for field in issue_fields:
+            if field in result:
+                field_value = result[field]
+                if isinstance(field_value, list):
+                    issues.extend([str(issue) for issue in field_value])
+                elif isinstance(field_value, str) and field_value.strip():
+                    issues.append(field_value)
+        
+        # Check for low confidence as an issue
+        confidence = result.get('confidence', 0.5)
+        if confidence < 0.4:
+            issues.append(f"Low confidence score: {confidence:.2%}")
+        
+        # Check for error conditions
+        if result.get('error'):
+            issues.append(f"Execution error: {result.get('error')}")
+        
+        return issues
+    
+    def _generate_recommendations(self, result: Dict[str, Any]) -> List[str]:
+        """Generate recommendations based on results"""
+        recommendations = []
+        
+        # Look for explicit recommendations
+        if 'recommendations' in result:
+            rec_value = result['recommendations']
+            if isinstance(rec_value, list):
+                recommendations.extend([str(rec) for rec in rec_value])
+            elif isinstance(rec_value, str) and rec_value.strip():
+                recommendations.append(rec_value)
+        
+        # Generate confidence-based recommendations
+        confidence = result.get('confidence', 0.5)
+        if confidence < 0.6:
+            recommendations.append("Consider additional verification due to low confidence")
+        if confidence < 0.4:
+            recommendations.append("Request human review for this output")
+        
+        # Performance-based recommendations
+        if self.evolution_state.fitness_score < 0.5:
+            recommendations.append("Agent may benefit from prompt evolution")
+        
+        # Memory-based recommendations
+        if self.memory.size() > self.memory.capacity * 0.9:
+            recommendations.append("Consider memory consolidation to improve performance")
+        
+        return recommendations
 
 
 class _OfflineLLMStub:

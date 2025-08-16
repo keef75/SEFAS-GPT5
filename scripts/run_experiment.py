@@ -11,6 +11,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import typer
 import asyncio
+import webbrowser
+from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 from typing import Optional
@@ -44,36 +46,130 @@ def run(
     # Run task
     result = asyncio.run(runner.run(task))
     
-    # Generate and display enhanced execution report
-    console.print("\n[bold green]📊 Generating Enhanced Execution Report...[/bold green]")
+    # Display comprehensive synthesis report
+    if 'synthesis' in result and result['synthesis']:
+        synthesis = result['synthesis']
+        console.print("\n[bold blue]📊 SEFAS Comprehensive Analysis Report[/bold blue]")
+        console.print("=" * 60)
+        
+        # Executive Summary
+        console.print("\n[bold]📋 Executive Summary:[/bold]")
+        exec_summary = synthesis.get('executive_summary', 'No summary available')
+        console.print(f"[italic]{exec_summary}[/italic]")
+        
+        # Key Metrics
+        console.print("\n[bold]🎯 Key Performance Metrics:[/bold]")
+        metrics_table = Table(title="System Performance")
+        metrics_table.add_column("Metric", style="cyan")
+        metrics_table.add_column("Value", style="magenta")
+        
+        performance = synthesis.get('performance', {})
+        consensus = synthesis.get('consensus', {})
+        proposals = synthesis.get('proposals', {})
+        verification = synthesis.get('verification', {})
+        evolution = synthesis.get('evolution', {})
+        
+        metrics_table.add_row("Task ID", result['task_id'])
+        metrics_table.add_row("Consensus Reached", "✅ Yes" if consensus.get('consensus_reached', False) else "❌ No")
+        metrics_table.add_row("Mean Confidence", f"{consensus.get('mean_confidence', 0.0):.2%}")
+        metrics_table.add_row("Total Proposals", str(proposals.get('total_proposals', 0)))
+        metrics_table.add_row("Verification Pass Rate", f"{verification.get('pass_rate', 0.0):.1%}")
+        metrics_table.add_row("Agents Evolved", str(len(evolution.get('evolved_agents', []))))
+        metrics_table.add_row("Execution Time", f"{performance.get('total_execution_time', 0.0):.2f}s")
+        metrics_table.add_row("Total Tokens", f"{performance.get('total_tokens_used', 0):,}")
+        metrics_table.add_row("Estimated Cost", f"${performance.get('estimated_cost_usd', 0.0):.4f}")
+        
+        console.print(metrics_table)
+        
+        # Agent Contributions
+        agent_contributions = synthesis.get('agent_contributions', {})
+        if agent_contributions:
+            console.print("\n[bold]🤖 Agent Contributions:[/bold]")
+            agent_table = Table(title="Individual Agent Performance")
+            agent_table.add_column("Agent", style="cyan")
+            agent_table.add_column("Role", style="yellow")
+            agent_table.add_column("Confidence", style="green")
+            agent_table.add_column("Time (s)", style="blue")
+            agent_table.add_column("Tokens", style="magenta")
+            agent_table.add_column("Fitness", style="red")
+            
+            for agent_id, contrib in list(agent_contributions.items())[:8]:  # Limit to 8 agents for display
+                agent_table.add_row(
+                    agent_id[:15] + "..." if len(agent_id) > 15 else agent_id,
+                    contrib['role'][:12] + "..." if len(contrib['role']) > 12 else contrib['role'],
+                    f"{contrib['confidence']:.1%}",
+                    f"{contrib['execution_time']:.2f}",
+                    str(contrib['tokens_used']),
+                    f"{contrib['fitness_score']:.1%}"
+                )
+            
+            console.print(agent_table)
+        
+        # Top Recommendations
+        recommendations = synthesis.get('recommendations', [])
+        if recommendations:
+            console.print("\n[bold]💡 Top Recommendations:[/bold]")
+            for i, rec in enumerate(recommendations[:5], 1):
+                source = rec.get('source', 'Unknown')
+                confidence = rec.get('confidence', 0.0)
+                recommendation = rec.get('recommendation', '')
+                console.print(f"  {i}. [bold]{source}[/bold] ({confidence:.1%}): {recommendation}")
+        
+        # Critical Issues
+        critical_issues = verification.get('critical_issues', [])
+        if critical_issues:
+            console.print("\n[bold red]⚠️ Critical Issues Identified:[/bold red]")
+            for issue in critical_issues[:3]:  # Show top 3 critical issues
+                checker = issue.get('checker', 'Unknown')
+                issue_text = issue.get('issue', '')
+                console.print(f"  • [bold]{checker}[/bold]: {issue_text}")
+        
+        # Report Files
+        if 'reports' in result and result['reports']:
+            console.print("\n[bold]📄 Generated Reports:[/bold]")
+            for format_type, filepath in result['reports'].items():
+                console.print(f"  • {format_type.upper()}: {filepath}")
+            
+            # Auto-open HTML report in browser if available
+            if 'html' in result['reports'] and not verbose:
+                html_path = result['reports']['html']
+                try:
+                    webbrowser.open(f"file://{Path(html_path).absolute()}")
+                    console.print(f"\n🌐 [bold green]HTML report opened in browser![/bold green]")
+                except Exception:
+                    console.print(f"\n💻 [yellow]Manual open: file://{Path(html_path).absolute()}[/yellow]")
     
-    # Display comprehensive report
-    execution_reporter.display_execution_report(result)
-    
-    # Generate structured report data
-    report_data = execution_reporter.generate_execution_report(result, save_to_file=True)
-    
-    # Show basic summary table for quick reference
-    table = Table(title="📋 Quick Summary")
-    table.add_column("Metric", style="cyan")
-    table.add_column("Value", style="magenta")
-    
-    table.add_row("Task ID", result['task_id'])
-    table.add_row("Hops Taken", str(result['current_hop']))
-    # Handle empty confidence scores gracefully
-    confidence_scores = result.get('confidence_scores', {})
-    if confidence_scores:
-        max_confidence = max(confidence_scores.values())
+    # Fallback to original execution reporter if synthesis not available
     else:
-        max_confidence = 0.0
-    
-    table.add_row("Final Confidence", f"{max_confidence:.2%}")
-    table.add_row("Consensus Reached", "✅" if result['consensus'] else "❌")
-    table.add_row("Total API Calls", str(len(result.get('proposals', [])) + len(result.get('verifications', []))))
-    table.add_row("Execution Time", f"{result.get('execution_time', 0):.2f}s")
-    table.add_row("Total Tokens", str(result.get('tokens_used', 0)))
-    
-    console.print(table)
+        console.print("\n[bold yellow]📊 Generating Enhanced Execution Report...[/bold yellow]")
+        
+        # Display comprehensive report
+        execution_reporter.display_execution_report(result)
+        
+        # Generate structured report data
+        report_data = execution_reporter.generate_execution_report(result, save_to_file=True)
+        
+        # Show basic summary table for quick reference
+        table = Table(title="📋 Quick Summary")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="magenta")
+        
+        table.add_row("Task ID", result['task_id'])
+        table.add_row("Hops Taken", str(result['current_hop']))
+        # Handle empty confidence scores gracefully
+        confidence_scores = result.get('confidence_scores', {})
+        if confidence_scores:
+            max_confidence = max(confidence_scores.values())
+        else:
+            max_confidence = 0.0
+        
+        table.add_row("Final Confidence", f"{max_confidence:.2%}")
+        table.add_row("Consensus Reached", "✅" if result['consensus'] else "❌")
+        table.add_row("Total API Calls", str(len(result.get('proposals', [])) + len(result.get('verifications', []))))
+        table.add_row("Execution Time", f"{result.get('execution_time', 0):.2f}s")
+        table.add_row("Total Tokens", str(result.get('tokens_used', 0)))
+        
+        console.print(table)
     
     if verbose:
         console.print("\n[bold]🧬 Evolution Report:[/bold]")
