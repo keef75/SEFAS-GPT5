@@ -523,23 +523,23 @@ The system achieved a mean confidence of **{confidence:.2%}** with {consensus_st
         
         # Bold text
         import re
-        html = re.sub(r'\\*\\*(.*?)\\*\\*', r'<strong>\\1</strong>', html)
+        html = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', html)
         
         # Italic text
-        html = re.sub(r'\\*(.*?)\\*', r'<em>\\1</em>', html)
+        html = re.sub(r'\*(.*?)\*', r'<em>\1</em>', html)
         
         # Code blocks
         html = html.replace('```', '<pre><code>').replace('```', '</code></pre>')
         
         # Inline code
-        html = re.sub(r'`(.*?)`', r'<code>\\1</code>', html)
+        html = re.sub(r'`(.*?)`', r'<code>\1</code>', html)
         
         # Line breaks
         html = html.replace('\n\n', '</p><p>')
         html = f'<p>{html}</p>'
         
         # Lists (basic)
-        html = re.sub(r'\n- (.*)', r'\n<li>\\1</li>', html)
+        html = re.sub(r'\n- (.*)', r'\n<li>\1</li>', html)
         html = html.replace('<li>', '<ul><li>').replace('</li>\n<li>', '</li><li>')
         html = html.replace('</li>\n', '</li></ul>\n')
         

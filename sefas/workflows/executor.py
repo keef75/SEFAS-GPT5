@@ -16,10 +16,11 @@ from sefas.monitoring.logging import (
     log_performance_metrics,
     log_evolution_event
 )
+from sefas.agents.factory import AgentFactory
 from sefas.agents.proposers import ProposerAgent, CreativeProposer, AnalyticalProposer, ResearchProposer
 from sefas.agents.checkers import CheckerAgent, LogicChecker, SemanticChecker, ConsistencyChecker
 from sefas.agents.orchestrator import OrchestratorAgent
-from sefas.evolution.belief_propagation import BeliefPropagationEngine
+from sefas.core.belief_propagation import BeliefPropagationEngine
 from sefas.reporting.report_synthesizer import ReportSynthesizer
 from sefas.reporting.final_report import FinalReportGenerator
 
@@ -35,19 +36,27 @@ class FederatedSystemRunner:
         if hasattr(settings, 'configure_langsmith'):
             settings.configure_langsmith()
         
-        # Load agent configurations
+        # Initialize agent factory and create all 15 agents
         try:
-            with open('config/agents.yaml', 'r') as f:
-                self.config = yaml.safe_load(f)
-        except FileNotFoundError:
-            # Use minimal default config if file doesn't exist
+            self.agent_factory = AgentFactory('config/agents.yaml')
+            self.agents = self.agent_factory.create_all_agents()
+            self.config = self.agent_factory.config
+            print(f"🤖 Initialized {len(self.agents)} agents from configuration")
+        except Exception as e:
+            print(f"Warning: Failed to load agent configuration: {e}")
+            # Fallback to minimal default config
             self.config = self._get_default_config()
-        
-        # Initialize agents
-        self.agents = self._initialize_agents()
+            self.agents = self._initialize_agents_fallback()
         
         # Initialize belief propagation
         self.belief_engine = BeliefPropagationEngine()
+        
+        # Initialize enhanced components
+        from sefas.core.validation import ValidatorPool
+        from sefas.core.redundancy import RedundancyOrchestrator
+        
+        self.validator_pool = ValidatorPool()
+        self.redundancy_orchestrator = RedundancyOrchestrator()
         
         # Initialize reporting system
         self.report_synthesizer = ReportSynthesizer()
@@ -89,7 +98,7 @@ class FederatedSystemRunner:
             }
         }
     
-    def _initialize_agents(self) -> Dict[str, Any]:
+    def _initialize_agents_fallback(self) -> Dict[str, Any]:
         """Initialize all agents from config"""
         agents = {}
         
@@ -145,9 +154,17 @@ class FederatedSystemRunner:
             # Step 3: Verify - check proposals
             verifications = await self._verify_proposals(task_id, proposals)
             
-            # Step 4: Belief Propagation - calculate consensus
-            beliefs = self.belief_engine.propagate(proposals, verifications)
-            consensus_summary = self.belief_engine.get_consensus_summary(beliefs)
+            # Step 4: Enhanced Belief Propagation - calculate consensus
+            consensus_result = await self.belief_engine.propagate()
+            
+            # Extract beliefs and consensus summary
+            beliefs = consensus_result.get('beliefs', {})
+            consensus_summary = {
+                'status': 'strong_consensus' if consensus_result.get('converged', False) else 'no_consensus',
+                'mean_belief': consensus_result.get('system_confidence', 0.0),
+                'consensus_reached': consensus_result.get('converged', False),
+                'system_confidence': consensus_result.get('system_confidence', 0.0)
+            }
             
             # Step 5: Evolution (if enabled)
             evolution_results = {}
@@ -390,111 +407,294 @@ class FederatedSystemRunner:
         return result
 
     async def _generate_proposals(self, task_id: str, decomposition: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Generate proposals from proposer agents"""
+        """Enhanced proposal generation with redundancy and belief propagation"""
         proposals = []
         hop_number = 1
         
         subclaims = decomposition.get('subclaims', [])
         
         for subclaim in subclaims:
-            assigned_agents = subclaim.get('assigned_agents', ['proposer_alpha'])
+            claim_id = subclaim.get('id', 'unknown_claim')
             
-            for agent_name in assigned_agents:
-                if agent_name in self.agents:
-                    start_time = time.time()
-                    agent = self.agents[agent_name]
+            # Get proposer agents for redundancy
+            provider_agents = [
+                agent for agent_name, agent in self.agents.items()
+                if 'proposer' in agent.role or 'domain' in agent.role or 'innovation' in agent.role
+            ]
+            
+            if not provider_agents:
+                # Fallback to assigned agents
+                assigned_agents = subclaim.get('assigned_agents', ['proposer_alpha'])
+                provider_agents = [
+                    self.agents[name] for name in assigned_agents
+                    if name in self.agents
+                ]
+            
+            if provider_agents:
+                try:
+                    # Use redundancy orchestrator for diverse proposals
+                    redundant_result = await self.redundancy_orchestrator.execute_with_redundancy(
+                        providers=provider_agents[:5],  # Limit to 5 for cost control
+                        task=subclaim.get('description', ''),
+                        strategy="reliable"
+                    )
                     
-                    try:
-                        proposal = agent.execute(subclaim)
-                        execution_time = time.time() - start_time
-                        
-                        # Enhance proposal with metadata
-                        proposal.update({
-                            'subclaim_id': subclaim.get('id'),
-                            'agent_id': agent_name,
-                            'agent_role': agent.role,
-                            'tokens_used': int(len(str(proposal)) * 1.3),  # Rough estimate
-                            'execution_time': execution_time
-                        })
-                        
-                        proposals.append(proposal)
-                        
-                        log_agent_execution(
-                            agent_id=agent_name,
-                            task_id=task_id,
-                            hop_number=hop_number,
-                            execution_time=execution_time,
-                            tokens_used=proposal['tokens_used'],
-                            success=True,
-                            message=f"Generated proposal for {subclaim.get('id')}"
-                        )
-                        
-                    except Exception as e:
-                        execution_time = time.time() - start_time
-                        log_agent_execution(
-                            agent_id=agent_name,
-                            task_id=task_id,
-                            hop_number=hop_number,
-                            execution_time=execution_time,
-                            tokens_used=0,
-                            success=False,
-                            message=f"Failed to generate proposal: {str(e)}"
-                        )
+                    # Process redundant results
+                    if 'versions' in redundant_result:
+                        for version in redundant_result['versions']:
+                            # Add to belief engine
+                            await self.belief_engine.add_proposal(
+                                claim_id=claim_id,
+                                content=version.get('content', ''),
+                                confidence=version.get('confidence', 0.5),
+                                agent_id=version.get('provider', 'unknown')
+                            )
+                            
+                            # Create proposal record
+                            proposal = {
+                                'subclaim_id': claim_id,
+                                'agent_id': version.get('provider', 'unknown'),
+                                'agent_role': 'proposer',
+                                'proposal': version.get('content', ''),
+                                'confidence': version.get('confidence', 0.5),
+                                'tokens_used': len(str(version.get('content', ''))) * 1.3,
+                                'execution_time': 0.5,  # Estimated
+                                'redundancy_version': version.get('version', 0)
+                            }
+                            
+                            proposals.append(proposal)
+                            
+                            log_agent_execution(
+                                agent_id=version.get('provider', 'unknown'),
+                                task_id=task_id,
+                                hop_number=hop_number,
+                                execution_time=0.5,
+                                tokens_used=int(proposal['tokens_used']),
+                                success=True,
+                                message=f"Generated redundant proposal for {claim_id}"
+                            )
+                    
+                    # Add consensus result if available
+                    if 'result' in redundant_result and redundant_result['result']:
+                        consensus = redundant_result['result']
+                        if 'consensus' in consensus and consensus['consensus']:
+                            # Add consensus to belief engine
+                            await self.belief_engine.add_proposal(
+                                claim_id=claim_id,
+                                content=consensus['consensus'],
+                                confidence=consensus.get('confidence', 0.7),
+                                agent_id='redundancy_consensus'
+                            )
+                            
+                            # Create consensus proposal
+                            consensus_proposal = {
+                                'subclaim_id': claim_id,
+                                'agent_id': 'redundancy_consensus',
+                                'agent_role': 'consensus',
+                                'proposal': consensus['consensus'],
+                                'confidence': consensus.get('confidence', 0.7),
+                                'tokens_used': len(str(consensus['consensus'])) * 1.3,
+                                'execution_time': 1.0,
+                                'is_consensus': True,
+                                'support': consensus.get('support', 0),
+                                'total_votes': consensus.get('total_votes', 0)
+                            }
+                            
+                            proposals.append(consensus_proposal)
+                            
+                except Exception as e:
+                    print(f"Redundancy orchestration failed for {claim_id}: {e}")
+                    
+                    # Fallback to traditional single-agent approach
+                    assigned_agents = subclaim.get('assigned_agents', ['proposer_alpha'])
+                    for agent_name in assigned_agents:
+                        if agent_name in self.agents:
+                            start_time = time.time()
+                            agent = self.agents[agent_name]
+                            
+                            try:
+                                proposal = agent.execute(subclaim)
+                                execution_time = time.time() - start_time
+                                
+                                # Add to belief engine
+                                proposal_content = proposal.get('proposal', str(proposal))
+                                proposal_confidence = proposal.get('confidence', 0.5)
+                                
+                                await self.belief_engine.add_proposal(
+                                    claim_id=claim_id,
+                                    content=proposal_content,
+                                    confidence=proposal_confidence,
+                                    agent_id=agent_name
+                                )
+                                
+                                # Enhance proposal with metadata
+                                proposal.update({
+                                    'subclaim_id': claim_id,
+                                    'agent_id': agent_name,
+                                    'agent_role': agent.role,
+                                    'tokens_used': int(len(str(proposal)) * 1.3),
+                                    'execution_time': execution_time,
+                                    'is_fallback': True
+                                })
+                                
+                                proposals.append(proposal)
+                                
+                                log_agent_execution(
+                                    agent_id=agent_name,
+                                    task_id=task_id,
+                                    hop_number=hop_number,
+                                    execution_time=execution_time,
+                                    tokens_used=proposal['tokens_used'],
+                                    success=True,
+                                    message=f"Generated fallback proposal for {claim_id}"
+                                )
+                                
+                            except Exception as e2:
+                                execution_time = time.time() - start_time
+                                log_agent_execution(
+                                    agent_id=agent_name,
+                                    task_id=task_id,
+                                    hop_number=hop_number,
+                                    execution_time=execution_time,
+                                    tokens_used=0,
+                                    success=False,
+                                    message=f"Failed to generate proposal: {str(e2)}"
+                                )
         
         return proposals
 
     async def _verify_proposals(self, task_id: str, proposals: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Verify proposals using checker agents"""
+        """Enhanced verification using validator pool with quorum"""
         verifications = []
         hop_number = 2
         
+        # Register checker agents with validator pool
         checker_agents = [name for name in self.agents.keys() if 'checker' in name]
+        for checker_name in checker_agents:
+            if checker_name in self.agents:
+                self.validator_pool.register_validator(checker_name, self.agents[checker_name])
         
         for proposal in proposals:
-            for checker_name in checker_agents:
-                if checker_name in self.agents:
-                    start_time = time.time()
-                    checker = self.agents[checker_name]
-                    
-                    try:
-                        verification = checker.execute({
-                            'proposal': proposal,
-                            'type': 'verification'
-                        })
-                        execution_time = time.time() - start_time
+            try:
+                # Prepare claim for validation
+                claim = {
+                    'claim_id': proposal.get('subclaim_id', 'unknown'),
+                    'content': proposal.get('proposal', ''),
+                    'confidence': proposal.get('confidence', 0.5),
+                    'evidence': [f"Generated by {proposal.get('agent_id', 'unknown')}"],
+                    'agent_id': proposal.get('agent_id', 'unknown')
+                }
+                
+                # Use validator pool for quorum-based validation
+                validation_result = await self.validator_pool.validate_with_quorum(
+                    claim=claim,
+                    quorum=3  # Require 3 validators to agree
+                )
+                
+                # Add validation to belief engine
+                await self.belief_engine.add_validation(
+                    claim_id=claim['claim_id'],
+                    validator_id='quorum_pool',
+                    result={
+                        'valid': validation_result.valid,
+                        'confidence': validation_result.confidence,
+                        'evidence': validation_result.evidence
+                    }
+                )
+                
+                # Create verification record
+                verification = {
+                    'proposal_id': proposal.get('subclaim_id'),
+                    'checker_id': 'validator_pool',
+                    'checker_role': 'quorum_validator',
+                    'verification': {
+                        'overall_score': validation_result.confidence,
+                        'passed': validation_result.valid,
+                        'details': validation_result.evidence
+                    },
+                    'confidence': validation_result.confidence,
+                    'issues_found': validation_result.errors if validation_result.errors else [],
+                    'tokens_used': len(str(validation_result.evidence)) * 1.2,
+                    'execution_time': validation_result.execution_time,
+                    'quorum_validation': True,
+                    'evidence': validation_result.evidence
+                }
+                
+                verifications.append(verification)
+                
+                log_agent_execution(
+                    agent_id='validator_pool',
+                    task_id=task_id,
+                    hop_number=hop_number,
+                    execution_time=validation_result.execution_time,
+                    tokens_used=verification['tokens_used'],
+                    success=validation_result.valid,
+                    message=f"Quorum validated proposal {claim['claim_id']} (confidence: {validation_result.confidence:.2f})"
+                )
+                
+            except Exception as e:
+                print(f"Enhanced validation failed for proposal {proposal.get('subclaim_id')}: {e}")
+                
+                # Fallback to traditional checker approach
+                checker_agents = [name for name in self.agents.keys() if 'checker' in name]
+                
+                for checker_name in checker_agents[:3]:  # Limit to 3 for efficiency
+                    if checker_name in self.agents:
+                        start_time = time.time()
+                        checker = self.agents[checker_name]
                         
-                        # Enhance verification with metadata
-                        verification.update({
-                            'proposal_id': proposal.get('subclaim_id'),
-                            'checker_id': checker_name,
-                            'checker_role': checker.role,
-                            'tokens_used': int(len(str(verification)) * 1.2),  # Rough estimate
-                            'execution_time': execution_time
-                        })
-                        
-                        verifications.append(verification)
-                        
-                        log_agent_execution(
-                            agent_id=checker_name,
-                            task_id=task_id,
-                            hop_number=hop_number,
-                            execution_time=execution_time,
-                            tokens_used=verification['tokens_used'],
-                            success=True,
-                            message=f"Verified proposal {proposal.get('subclaim_id')}"
-                        )
-                        
-                    except Exception as e:
-                        execution_time = time.time() - start_time
-                        log_agent_execution(
-                            agent_id=checker_name,
-                            task_id=task_id,
-                            hop_number=hop_number,
-                            execution_time=execution_time,
-                            tokens_used=0,
-                            success=False,
-                            message=f"Failed to verify proposal: {str(e)}"
-                        )
+                        try:
+                            verification = checker.execute({
+                                'proposal': proposal,
+                                'type': 'verification'
+                            })
+                            execution_time = time.time() - start_time
+                            
+                            # Add to belief engine (fallback)
+                            overall_score = verification.get('verification', {}).get('overall_score', 0.5)
+                            await self.belief_engine.add_validation(
+                                claim_id=proposal.get('subclaim_id', 'unknown'),
+                                validator_id=checker_name,
+                                result={
+                                    'valid': overall_score > 0.6,
+                                    'confidence': overall_score,
+                                    'evidence': str(verification)
+                                }
+                            )
+                            
+                            # Enhance verification with metadata
+                            verification.update({
+                                'proposal_id': proposal.get('subclaim_id'),
+                                'checker_id': checker_name,
+                                'checker_role': checker.role,
+                                'tokens_used': int(len(str(verification)) * 1.2),
+                                'execution_time': execution_time,
+                                'is_fallback': True
+                            })
+                            
+                            verifications.append(verification)
+                            
+                            log_agent_execution(
+                                agent_id=checker_name,
+                                task_id=task_id,
+                                hop_number=hop_number,
+                                execution_time=execution_time,
+                                tokens_used=verification['tokens_used'],
+                                success=True,
+                                message=f"Fallback verified proposal {proposal.get('subclaim_id')}"
+                            )
+                            
+                        except Exception as e2:
+                            execution_time = time.time() - start_time
+                            log_agent_execution(
+                                agent_id=checker_name,
+                                task_id=task_id,
+                                hop_number=hop_number,
+                                execution_time=execution_time,
+                                tokens_used=0,
+                                success=False,
+                                message=f"Failed to verify proposal: {str(e2)}"
+                            )
         
         return verifications
 

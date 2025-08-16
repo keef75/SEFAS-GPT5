@@ -67,7 +67,7 @@ class SelfEvolvingAgent(ABC):
         self.reasoning_steps = []
         self.tools_used = []
         
-    def execute(self, task: Dict[str, Any], context: Dict[str, Any] = None) -> Dict[str, Any]:
+    def execute(self, task: Dict[str, Any], context: Dict[str, Any] = None, **kwargs) -> Dict[str, Any]:
         """Execute task with comprehensive reporting"""
         
         start_time = time.time()

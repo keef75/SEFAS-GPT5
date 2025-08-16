@@ -4,27 +4,31 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-SEFAS (Self-Evolving Federated Agent System) is a multi-agent AI system implementing autonomous evolution through federated intelligence. The system features 15 specialized agent roles that collaborate in a dynamic topology using m→m+1 hop execution patterns.
+SEFAS (Self-Evolving Federated Agent System) is a next-generation multi-agent AI system implementing autonomous evolution through federated intelligence. The system features 17 specialized agent roles that collaborate using advanced redundancy patterns, belief propagation, and industrial-grade reliability mechanisms including N-version programming, quorum-based validation, and circuit breakers.
 
 ## Core Architecture
 
-### Federated Agent System
-- **Agent Roles**: 15 specialized agents organized in 3 layers:
-  - Layer 1: Orchestrator, Task Decomposer, Strategy Evolver
-  - Layer 2: Proposer Alpha/Beta/Gamma (creative/practical/alternative)
-  - Layer 3: Checker Logic/Semantic/Consistency
-- **Evolution State**: Each agent maintains `EvolutionState` with fitness tracking, performance history, and strategy genome
-- **Federated State**: Global system state coordinating multi-agent execution with hop tracking
+### Enhanced Federated Agent System
+- **Agent Roles**: 17 specialized agents organized in 3 layers:
+  - **Layer 1 - Strategic Command**: Orchestrator, Task Decomposer, Strategy Evolver
+  - **Layer 2 - Creative & Analytical Generation**: Proposer Alpha/Beta/Gamma, Domain Expert, Technical Architect, Innovation Catalyst, Strategic Planner
+  - **Layer 3 - Quality Assurance & Validation**: Logic/Semantic/Consistency Validators, Quality Assurer, Performance Optimizer, Risk Assessor, Compliance Officer
+- **Enhanced Reliability**: Industrial-grade redundancy with N-version programming, quorum validation, and circuit breakers
+- **Agent Factory**: Dynamic agent creation from `config/agents.yaml` with full LLM parameter control
+- **Management Interface**: CLI tools for easy agent configuration and monitoring via `scripts/manage_agents.py`
 
-### Key Data Flows
-- **M→M+1 Hop Pattern**: Tasks flow through hops (0=decomposition, 1=proposition, 2=validation, M=refinement)
-- **Evolution Cycle**: Performance → Fitness → Mutation → Validation → Deployment
-- **Confidence Threshold**: System reaches consensus when confidence >= 0.7 (configurable)
+### Enhanced Data Flows & Reliability
+- **Redundant Proposal Generation**: N-version programming with 5 diverse agent providers for exponential error reduction
+- **Belief Propagation Engine**: Advanced consensus calculation with convergence detection and confidence weighting
+- **Quorum-Based Validation**: 3+ validators required for consensus with intelligent fallback mechanisms
+- **Circuit Breakers**: Fault tolerance preventing cascade failures with automatic recovery
+- **Hedged Requests**: Tail latency reduction through concurrent execution with first-wins semantics
 
 ### Configuration System
-- **YAML-based Agent Definitions**: `config/agents.yaml` defines roles, prompts, temperatures, strategies
-- **Pydantic Settings**: `config/settings.py` with environment variable support
-- **Evolution Budget**: 20% of compute allocated to evolution (configurable)
+- **Complete Agent Control**: `config/agents.yaml` with per-agent model, temperature, max_tokens, rate_limit_ms, and custom prompts
+- **Agent Management CLI**: `scripts/manage_agents.py` for interactive configuration, cloning, and topology visualization  
+- **Pydantic Settings**: `config/settings.py` with environment variable support and validation
+- **Dynamic Agent Factory**: `sefas/agents/factory.py` creates agents from configuration with graceful fallbacks
 
 ## Development Commands
 
@@ -63,6 +67,14 @@ pytest tests/unit/test_agents/test_orchestrator.py  # Single test file
 
 # Comprehensive testing
 python test_agents.py       # Full system test suite with 5 challenge types
+python test_improvements.py # Test enhanced belief propagation, validation, and redundancy
+
+# Agent Management
+python scripts/manage_agents.py list              # View all 17 agents
+python scripts/manage_agents.py show orchestrator # Detailed agent configuration
+python scripts/manage_agents.py edit proposer_alpha # Interactive configuration editing
+python scripts/manage_agents.py topology          # Network visualization
+python scripts/manage_agents.py quick-config      # Batch modifications
 
 # Code quality
 make lint                   # ruff + mypy
@@ -88,6 +100,23 @@ tail -f logs/evolution.log  # Evolution events
 # View detailed execution reports
 ls data/reports/            # Saved execution reports (JSON format)
 ```
+
+## Enhanced Architecture Components
+
+### Reliability & Redundancy Systems
+- **`sefas/core/redundancy.py`**: Industrial-grade redundancy orchestrator with circuit breakers, hedged requests, and N-version programming
+- **`sefas/core/validation.py`**: Enhanced validator pool with quorum-based consensus and comprehensive error handling  
+- **`sefas/core/belief_propagation.py`**: Advanced belief propagation engine with convergence detection and confidence weighting
+
+### Agent Management & Configuration
+- **`sefas/agents/factory.py`**: Dynamic agent factory supporting 17+ agents with DynamicAgent class for flexible roles
+- **`scripts/manage_agents.py`**: Full-featured CLI for agent configuration, visualization, and batch operations
+- **`config/agents.yaml`**: Comprehensive 17-agent configuration with individual LLM parameters and topology definitions
+
+### Enhanced Execution & Reporting  
+- **`sefas/workflows/executor.py`**: Enhanced FederatedSystemRunner with redundancy orchestration and quorum validation
+- **`sefas/reporting/final_report.py`**: Multi-format report generation (HTML/JSON/Markdown) with fixed template rendering
+- **`sefas/monitoring/execution_reporter.py`**: Rich terminal displays with comprehensive performance analytics
 
 ## Key Implementation Patterns
 
@@ -160,14 +189,14 @@ ls data/reports/            # Saved execution reports (JSON format)
 - `sefas/workflows/`: LangGraph orchestration and execution flows
 
 ### Current Implementation Status
-- **Core State**: Fully implemented with EvolutionState and FederatedState
-- **Configuration**: Complete with environment/YAML loading and robust error handling
-- **Monitoring**: Full LangSmith integration, performance tracking, and enhanced execution reporting
-- **CLI**: Functional with multi-hop execution, auto-command insertion, and comprehensive visual reporting
-- **Agent Implementations**: Working federated execution with defensive error handling
-- **Execution Reporting**: Rich terminal displays with JSON export functionality (sefas.monitoring.execution_reporter)
-- **Evolution Module**: Architecture defined, implementation pending
-- **Error Handling**: Comprehensive exception handling with partial state preservation
+- **Enhanced Agent System**: Fully operational 17-agent network with dynamic configuration and management
+- **Reliability Stack**: Complete redundancy orchestration with N-version programming, quorum validation, and circuit breakers
+- **Belief Propagation**: Advanced consensus engine with convergence detection and confidence weighting
+- **Agent Management**: Full CLI interface for configuration, monitoring, and batch operations
+- **Report Generation**: Multi-format outputs (HTML/JSON/Markdown) with fixed template rendering
+- **Error Handling**: Comprehensive exception handling with partial state preservation and graceful fallbacks
+- **Performance Monitoring**: Enhanced execution reporting with Rich terminal displays and structured data export
+- **Configuration System**: Complete YAML-based agent definitions with per-agent LLM parameter control
 
 ### Configuration Dependencies
 - Requires `OPENAI_API_KEY` for LLM operations

@@ -5,6 +5,10 @@ Main CLI for running SEFAS experiments
 
 import sys
 from pathlib import Path
+from sefas.core.belief_propagation import BeliefPropagationEngine
+from sefas.core.validation import ValidatorPool
+from sefas.core.redundancy import RedundancyOrchestrator
+
 
 # Ensure repository root is on sys.path for absolute imports like `config.*`
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
