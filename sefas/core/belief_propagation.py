@@ -14,10 +14,17 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 
 # CRITICAL FIX: Define allowed proposer agents to prevent echo bug
+# Support both config keys AND display names to handle system variations
 ALLOWED_PROPOSERS = {
+    # Config keys (preferred)
     "proposer_alpha", "proposer_beta", "proposer_gamma",
-    "domain_expert", "technical_architect", "innovation_catalyst",
-    "strategic_planner", "orchestrator"  # orchestrator allowed for task decomposition
+    "domain_expert", "technical_architect", "innovation_catalyst", 
+    "strategic_planner", "orchestrator",
+    
+    # Display names (for compatibility with live system)
+    "Alpha Creative Engine", "Beta Analytical Engine", "Gamma Research Specialist",
+    "Specialized Domain Expert", "System Technical Architect", "Innovation Catalyst",
+    "Strategic Planning Specialist", "Central Orchestrator"
 }
 
 class BeliefNode(BaseModel):
@@ -67,13 +74,18 @@ class BeliefPropagationEngine:
         
     async def add_proposal(self, claim_id: str, content: str, confidence: float, agent_id: str):
         """Add a proposal from an agent"""
+        # CRITICAL DEBUG: Log all proposal attempts
+        logger.info(f"🔍 PROPOSAL ATTEMPT: claim_id={claim_id}, agent_id='{agent_id}', confidence={confidence:.2f}")
+        logger.info(f"🔍 ALLOWED_PROPOSERS: {ALLOWED_PROPOSERS}")
+        
         # CRITICAL FIX: Filter out non-proposer sources to prevent echo bug
         if agent_id not in ALLOWED_PROPOSERS:
-            logger.debug(f"🚨 ECHO BUG PREVENTION: Skipping non-proposer source: {agent_id}")
+            logger.warning(f"🚨 ECHO BUG PREVENTION: Skipping non-proposer source: '{agent_id}' (not in allowed list)")
             return
         
         if claim_id not in self.beliefs:
             self.beliefs[claim_id] = BeliefNode(claim_id=claim_id)
+            logger.info(f"🎯 CREATED BELIEF NODE: {claim_id} (total nodes: {len(self.beliefs)})")
         
         node = self.beliefs[claim_id]
         
@@ -88,22 +100,33 @@ class BeliefPropagationEngine:
         
         node.evidence_count += 1
         
-        logger.info(f"Added proposal for {claim_id} from {agent_id}: confidence={confidence:.2f} -> {node.candidates[content]:.2f}")
+        logger.info(f"✅ PROPOSAL ADDED: {claim_id} from {agent_id}: confidence={confidence:.2f} -> {node.candidates[content]:.2f}")
+        logger.info(f"📊 BELIEF STATE: {claim_id} now has {len(node.candidates)} candidates, evidence_count={node.evidence_count}")
     
     async def add_validation(self, claim_id: str, validator_id: str, result: Dict):
         """Add validation result - UPSERT not APPEND to prevent double-counting"""
         # CRITICAL FIX: Key by (claim, validator, round) to prevent data corruption
         key = (claim_id, validator_id, self.current_round)
         
+        # CRITICAL FIX: Handle signed validation with verdicts and LLR
+        verdict = result.get('verdict', 'abstain')
+        confidence = result.get('confidence', 0.5)
+        
+        # Calculate LLR for belief propagation
+        from sefas.core.validation import verdict_to_llr
+        llr = verdict_to_llr(verdict, confidence)
+        
         # Replace instead of append - this prevents double-counting validators!
         self.validator_messages[key] = {
-            'valid': result.get('valid', True),
-            'confidence': result.get('confidence', 0.5),
+            'verdict': verdict,
+            'confidence': confidence,
+            'llr': llr,  # Log-likelihood ratio for BP
+            'valid': result.get('valid', verdict != "reject"),  # Legacy compatibility
             'evidence': result.get('evidence', ''),
             'timestamp': time.time()
         }
         
-        logger.info(f"🚨 DATA INTEGRITY: Added validation for {claim_id} from {validator_id} (round {self.current_round}): {result.get('confidence', 0.5):.2f}")
+        logger.info(f"🚨 SIGNED VALIDATION: Added {verdict} for {claim_id} from {validator_id} (round {self.current_round}): conf={confidence:.2f}, llr={llr:.2f}")
     
     def normalize_beliefs(self):
         """Normalize probability distributions while preserving confidence relationships"""
@@ -128,7 +151,7 @@ class BeliefPropagationEngine:
         Run stabilized belief propagation with oscillation detection until convergence.
         Returns consensus results with confidence scores.
         """
-        logger.info(f"Starting stabilized belief propagation with {len(self.beliefs)} nodes")
+        logger.info(f"🚀 STARTING BELIEF PROPAGATION: {len(self.beliefs)} nodes: {list(self.beliefs.keys())}")
         
         # Reset stability tracking
         self.oscillation_history = []
@@ -233,43 +256,52 @@ class BeliefPropagationEngine:
                 
             node = self.beliefs[claim_id]
             
-            # Calculate average validation confidence for this claim
-            total_validation_conf = 0.0
-            positive_validations = 0
+            # CRITICAL FIX: Use signed validation with LLR for proper belief propagation
+            total_llr = 0.0
+            support_count = 0
+            reject_count = 0
+            abstain_count = 0
             total_validations = len(validations)
             
             for validation in validations:
-                checker_conf = validation['confidence']
-                is_valid = validation['valid']
+                verdict = validation.get('verdict', 'abstain')
+                llr = validation.get('llr', 0.0)
                 
-                total_validation_conf += checker_conf
-                if is_valid:
-                    positive_validations += 1
+                total_llr += llr
+                if verdict == "support":
+                    support_count += 1
+                elif verdict == "reject":
+                    reject_count += 1
+                else:
+                    abstain_count += 1
             
             if total_validations > 0:
-                avg_validation_conf = total_validation_conf / total_validations
-                validation_success_rate = positive_validations / total_validations
+                avg_llr = total_llr / total_validations
                 
-                # Apply validation influence more meaningfully
-                validation_multiplier = avg_validation_conf * validation_success_rate
+                # Calculate validation strength based on consensus
+                consensus_strength = max(support_count, reject_count) / total_validations
                 
-                # Update all candidates based on validation results
+                # Update all candidates based on LLR-based validation
                 for content in node.candidates:
                     current_conf = node.candidates[content]
                     
-                    # Apply more conservative validation influence
-                    if validation_success_rate > 0.6 and avg_validation_conf > 0.6:
-                        # Modest boost for strong positive validation
-                        boost_factor = 1.0 + (validation_multiplier * 0.15)
+                    # Apply LLR influence with consensus weighting
+                    if total_llr > 0.5 and consensus_strength > 0.6:
+                        # Strong positive consensus - boost confidence
+                        boost_factor = 1.0 + (avg_llr * 0.2 * consensus_strength)
                         node.candidates[content] = min(0.95, current_conf * boost_factor)
-                    elif validation_success_rate < 0.4 or avg_validation_conf < 0.4:
-                        # Modest penalty for poor validation
-                        penalty_factor = 1.0 - (validation_multiplier * 0.1)
-                        node.candidates[content] = max(0.15, current_conf * penalty_factor)
-                    # For moderate validation, apply small adjustment
+                    elif total_llr < -0.5 and consensus_strength > 0.6:
+                        # Strong negative consensus - reduce confidence
+                        penalty_factor = 1.0 + (avg_llr * 0.2 * consensus_strength)  # avg_llr is negative
+                        node.candidates[content] = max(0.05, current_conf * penalty_factor)
+                    elif abs(total_llr) < 0.1 or consensus_strength < 0.4:
+                        # Weak or conflicted consensus - minimal change
+                        adjustment = avg_llr * 0.05
+                        node.candidates[content] = max(0.05, min(0.95, current_conf + adjustment))
                     else:
-                        adjustment = (validation_success_rate - 0.5) * 0.05
-                        node.candidates[content] = max(0.15, min(0.95, current_conf + adjustment))
+                        # Moderate consensus - apply proportional adjustment
+                        adjustment = avg_llr * 0.1 * consensus_strength
+                        node.candidates[content] = max(0.05, min(0.95, current_conf + adjustment))
         
         # Re-normalize after message passing
         self.normalize_beliefs()

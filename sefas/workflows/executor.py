@@ -479,6 +479,7 @@ class FederatedSystemRunner:
                         consensus = redundant_result['result']
                         if 'consensus' in consensus and consensus['consensus']:
                             # Add consensus to belief engine
+                            
                             await self.belief_engine.add_proposal(
                                 claim_id=claim_id,
                                 content=consensus['consensus'],
@@ -591,18 +592,29 @@ class FederatedSystemRunner:
                     quorum=3  # Require 3 validators to agree
                 )
                 
-                # Add validation to belief engine
+                # ✅ FIX: Convert validation result to verdict and LLR
+                if validation_result.valid:
+                    verdict = "support"
+                    llr = abs(validation_result.confidence * 20)
+                elif validation_result.confidence < 0.4:
+                    verdict = "reject"
+                    llr = -abs((1 - validation_result.confidence) * 20)
+                else:
+                    verdict = "abstain"
+                    llr = 0.0
+
                 await self.belief_engine.add_validation(
                     claim_id=claim['claim_id'],
                     validator_id='quorum_pool',
                     result={
-                        'valid': validation_result.valid,
+                        'verdict': verdict,
                         'confidence': validation_result.confidence,
-                        'evidence': validation_result.evidence
+                        'llr': llr,
+                        'valid': validation_result.valid
                     }
                 )
-                
-                # Create verification record
+                                    
+                # Create verification record (add verdict and LLR to record)
                 verification = {
                     'proposal_id': proposal.get('subclaim_id'),
                     'checker_id': 'validator_pool',
@@ -610,7 +622,9 @@ class FederatedSystemRunner:
                     'verification': {
                         'overall_score': validation_result.confidence,
                         'passed': validation_result.valid,
-                        'details': validation_result.evidence
+                        'details': validation_result.evidence,
+                        'verdict': verdict,  # ← Add to record
+                        'llr': llr  # ← Add to record
                     },
                     'confidence': validation_result.confidence,
                     'issues_found': validation_result.errors if validation_result.errors else [],
@@ -629,7 +643,7 @@ class FederatedSystemRunner:
                     execution_time=validation_result.execution_time,
                     tokens_used=verification['tokens_used'],
                     success=validation_result.valid,
-                    message=f"Quorum validated proposal {claim['claim_id']} (confidence: {validation_result.confidence:.2f})"
+                    message=f"Quorum validated proposal {claim['claim_id']} (verdict: {verdict}, LLR: {llr:.2f})"
                 )
                 
             except Exception as e:
@@ -650,15 +664,29 @@ class FederatedSystemRunner:
                             })
                             execution_time = time.time() - start_time
                             
-                            # Add to belief engine (fallback)
+                            # ✅ Your fallback fix is correct!
                             overall_score = verification.get('verification', {}).get('overall_score', 0.5)
+                            
+                            # Convert score to verdict and LLR
+                            if overall_score > 0.7:
+                                verdict = "support"
+                                llr = overall_score * 20
+                            elif overall_score < 0.4:
+                                verdict = "reject"
+                                llr = -(1 - overall_score) * 20
+                            else:
+                                verdict = "abstain"
+                                llr = 0.0
+                            
+                            # Add to belief engine with direct parameters
                             await self.belief_engine.add_validation(
                                 claim_id=proposal.get('subclaim_id', 'unknown'),
                                 validator_id=checker_name,
                                 result={
-                                    'valid': overall_score > 0.6,
+                                    'verdict': verdict,
                                     'confidence': overall_score,
-                                    'evidence': str(verification)
+                                    'llr': llr,
+                                    'valid': overall_score > 0.6
                                 }
                             )
                             
@@ -669,7 +697,9 @@ class FederatedSystemRunner:
                                 'checker_role': checker.role,
                                 'tokens_used': int(len(str(verification)) * 1.2),
                                 'execution_time': execution_time,
-                                'is_fallback': True
+                                'is_fallback': True,
+                                'verdict': verdict,  # ← Add verdict
+                                'llr': llr  # ← Add LLR
                             })
                             
                             verifications.append(verification)
@@ -681,7 +711,7 @@ class FederatedSystemRunner:
                                 execution_time=execution_time,
                                 tokens_used=verification['tokens_used'],
                                 success=True,
-                                message=f"Fallback verified proposal {proposal.get('subclaim_id')}"
+                                message=f"Fallback verified proposal {proposal.get('subclaim_id')} (verdict: {verdict})"
                             )
                             
                         except Exception as e2:

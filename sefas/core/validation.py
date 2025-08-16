@@ -6,8 +6,9 @@ import asyncio
 import hashlib
 import json
 import logging
-from typing import Dict, List, Optional, Any
-from pydantic import BaseModel, Field
+from math import log
+from typing import Dict, List, Optional, Any, Literal
+from pydantic import BaseModel, Field, validator
 from datetime import datetime
 
 from sefas.core.circuit_breaker import (
@@ -19,15 +20,46 @@ from sefas.core.circuit_breaker import (
 
 logger = logging.getLogger(__name__)
 
+def verdict_to_llr(verdict: str, confidence: float) -> float:
+    """Convert verdict to log-likelihood ratio for BP"""
+    # CRITICAL FIX: Clamp confidence to avoid log(0)
+    conf = min(max(confidence, 1e-6), 1 - 1e-6)
+    llr = log(conf / (1 - conf))
+    
+    if verdict == "support":
+        return +llr  # Positive evidence
+    elif verdict == "reject":
+        return -llr  # Negative evidence
+    else:  # abstain
+        return 0.0   # Neutral evidence
+
 class ValidationResult(BaseModel):
-    """Result of a validation check"""
-    valid: bool = True
+    """Result of a validation check with signed verdicts"""
+    # CRITICAL FIX: Validators must take a stance - support/reject/abstain
+    verdict: Literal["support", "reject", "abstain"] = "abstain"
     confidence: float = Field(ge=0.0, le=1.0, default=0.5)
-    evidence: str = ""
+    evidence: List[str] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
     validator_id: str = ""
     timestamp: datetime = Field(default_factory=datetime.now)
     execution_time: float = 0.0
+    llr: float = 0.0  # Computed from verdict + confidence
+    
+    # Legacy compatibility
+    valid: bool = True  # Derived from verdict != "reject"
+    
+    @validator('llr', always=True)
+    def compute_llr(cls, v, values):
+        """Compute log-likelihood ratio from verdict and confidence"""
+        verdict = values.get('verdict', 'abstain')
+        confidence = values.get('confidence', 0.5)
+        return verdict_to_llr(verdict, confidence)
+    
+    @validator('valid', always=True)
+    def compute_valid(cls, v, values):
+        """Compute legacy valid field from verdict"""
+        verdict = values.get('verdict', 'abstain')
+        return verdict != "reject"
     
 class EnhancedValidator:
     """
@@ -111,10 +143,18 @@ class EnhancedValidator:
             'timestamp': datetime.now()
         })
         
+        # CRITICAL FIX: Convert to signed verdict
+        if is_valid and avg_confidence > 0.7:
+            verdict = "support"
+        elif not is_valid or avg_confidence < 0.3:
+            verdict = "reject"
+        else:
+            verdict = "abstain"  # Uncertain cases
+        
         return ValidationResult(
-            valid=is_valid,
+            verdict=verdict,
             confidence=avg_confidence,
-            evidence=' | '.join(evidence_parts),
+            evidence=evidence_parts,
             errors=errors,
             validator_id=self.validator_type,
             execution_time=time.time() - start_time
@@ -318,26 +358,66 @@ class ValidatorPool:
         if len(valid_results) < quorum:
             logger.warning(f"Insufficient validators: {len(valid_results)} < {quorum}")
             return ValidationResult(
-                valid=False,
+                verdict="abstain",
                 confidence=0.0,
-                evidence="Insufficient validator consensus",
+                evidence=["Insufficient validator consensus"],
                 errors=[f"Only {len(valid_results)} validators succeeded"]
             )
         
-        # Calculate quorum consensus
-        valid_count = sum(1 for r in valid_results if r.valid)
-        total_confidence = sum(r.confidence for r in valid_results)
-        avg_confidence = total_confidence / len(valid_results)
+        # CRITICAL FIX: Calculate verdict-based consensus using LLR
+        support_count = sum(1 for r in valid_results if r.verdict == "support")
+        reject_count = sum(1 for r in valid_results if r.verdict == "reject")
+        abstain_count = sum(1 for r in valid_results if r.verdict == "abstain")
         
-        # Require majority for validity
-        is_valid = valid_count >= quorum
+        total_llr = sum(r.llr for r in valid_results)
+        avg_confidence = sum(r.confidence for r in valid_results) / len(valid_results)
+        
+        # CRITICAL FIX: Use majority voting instead of absolute quorum thresholds
+        total_validators = len(valid_results)
+        majority_threshold = total_validators // 2 + 1  # More than half
+        
+        logger.info(f"🗳️ QUORUM VOTING: {total_validators} validators - support:{support_count}, reject:{reject_count}, abstain:{abstain_count}")
+        logger.info(f"🗳️ MAJORITY THRESHOLD: {majority_threshold}, total_llr:{total_llr:.3f}, avg_conf:{avg_confidence:.3f}")
+        
+        # Determine verdict using majority voting with confidence backup
+        if support_count >= majority_threshold:
+            verdict = "support"
+            logger.info(f"🗳️ VERDICT: support (majority {support_count}/{total_validators})")
+        elif reject_count >= majority_threshold:
+            verdict = "reject"
+            logger.info(f"🗳️ VERDICT: reject (majority {reject_count}/{total_validators})")
+        elif support_count > reject_count:
+            # Plurality support (most votes but not majority)
+            verdict = "support" if avg_confidence > 0.6 else "abstain"
+            logger.info(f"🗳️ VERDICT: {verdict} (plurality support {support_count} > {reject_count}, conf={avg_confidence:.3f})")
+        elif reject_count > support_count:
+            # Plurality reject (most votes but not majority)
+            verdict = "reject" if avg_confidence < 0.4 else "abstain"
+            logger.info(f"🗳️ VERDICT: {verdict} (plurality reject {reject_count} > {support_count}, conf={avg_confidence:.3f})")
+        else:
+            # Tie or all abstain - use confidence as tiebreaker
+            if avg_confidence > 0.7:
+                verdict = "support"
+                logger.info(f"🗳️ VERDICT: support (tie-breaker, high confidence {avg_confidence:.3f})")
+            elif avg_confidence < 0.3:
+                verdict = "reject"
+                logger.info(f"🗳️ VERDICT: reject (tie-breaker, low confidence {avg_confidence:.3f})")
+            else:
+                verdict = "abstain"
+                logger.info(f"🗳️ VERDICT: abstain (tie-breaker, moderate confidence {avg_confidence:.3f})")
         
         # Aggregate evidence
-        all_evidence = ' | '.join([r.evidence for r in valid_results if r.evidence])
+        all_evidence = []
+        for r in valid_results:
+            if isinstance(r.evidence, list):
+                all_evidence.extend(r.evidence)
+            elif r.evidence:
+                all_evidence.append(str(r.evidence))
+        
         all_errors = [err for r in valid_results for err in r.errors]
         
         return ValidationResult(
-            valid=is_valid,
+            verdict=verdict,
             confidence=avg_confidence,
             evidence=all_evidence,
             errors=all_errors,
@@ -393,7 +473,7 @@ class ValidatorPool:
                 breaker_name, execute_validation
             )
             
-            # Parse agent response into ValidationResult
+            # Parse agent response into ValidationResult with signed verdict
             confidence = result.get('confidence', 0.5)
             
             # Handle verification result properly
@@ -407,15 +487,30 @@ class ValidatorPool:
                 overall_score = confidence
                 evidence = result.get('reasoning', result.get('summary', result.get('proposal', '')))
             
+            # CRITICAL FIX: Convert to signed verdict based on confidence and validity
+            if is_valid and overall_score > 0.7:
+                verdict = "support"
+            elif not is_valid or overall_score < 0.3:
+                verdict = "reject"
+            else:
+                verdict = "abstain"  # Uncertain/middle ground
+            
+            logger.info(f"🔍 INDIVIDUAL VALIDATOR: {agent_name} → verdict={verdict}, conf={overall_score:.3f}, valid={is_valid}")
+            
             # Extract any issues found
             issues = result.get('issues', [])
             if isinstance(issues, str):
                 issues = [issues]
             
+            # Ensure evidence is a list
+            evidence_list = [evidence] if isinstance(evidence, str) else evidence
+            if not evidence_list:
+                evidence_list = []
+            
             return ValidationResult(
-                valid=is_valid,
+                verdict=verdict,
                 confidence=overall_score,
-                evidence=evidence,
+                evidence=evidence_list,
                 errors=issues,
                 validator_id=agent_name
             )
@@ -423,9 +518,9 @@ class ValidatorPool:
         except CircuitBreakerOpenError:
             logger.warning(f"Circuit breaker is OPEN for validator {agent_name}")
             return ValidationResult(
-                valid=False,
+                verdict="abstain",
                 confidence=0.0,
-                evidence=f"Validator {agent_name} unavailable (circuit breaker OPEN)",
+                evidence=[f"Validator {agent_name} unavailable (circuit breaker OPEN)"],
                 errors=["Circuit breaker protection active"],
                 validator_id=agent_name
             )
@@ -433,9 +528,9 @@ class ValidatorPool:
         except CircuitBreakerExecutionError as e:
             logger.error(f"Circuit breaker recorded failure for validator {agent_name}: {e}")
             return ValidationResult(
-                valid=False,
+                verdict="abstain",
                 confidence=0.0,
-                evidence=f"Validation failed: {str(e)}",
+                evidence=[f"Validation failed: {str(e)}"],
                 errors=[str(e)],
                 validator_id=agent_name
             )
@@ -443,9 +538,9 @@ class ValidatorPool:
         except Exception as e:
             logger.error(f"Agent validation failed: {e}")
             return ValidationResult(
-                valid=False,
+                verdict="abstain",
                 confidence=0.0,
-                evidence=f"Validation error: {str(e)}",
+                evidence=[f"Validation error: {str(e)}"],
                 errors=[str(e)],
                 validator_id=agent_name
             )
