@@ -254,6 +254,10 @@ python scripts/run_experiment.py "Create microservices architecture for e-commer
 ```bash
 python scripts/run_experiment.py "Evaluate cybersecurity risks for cloud migration" --verbose
 ```
+### API and .env issues
+```bash
+unset OPENAI_API_KEY && python3 scripts/run_experiment.py "Solve nuclear fusion as human energy source" --verbose
+```
 
 ---
 
