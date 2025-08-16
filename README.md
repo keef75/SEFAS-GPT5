@@ -11,9 +11,13 @@
 
 </div>
 
+---
+
 ## 🌟 Overview
 
 SEFAS is an advanced multi-agent AI system featuring **15 specialized agents** that collaborate through **federated intelligence** and **autonomous evolution**. Unlike traditional AI systems, SEFAS agents continuously evolve their strategies and optimize their collaborative networks.
+
+---
 
 ### ✨ Key Features
 
@@ -23,12 +27,17 @@ SEFAS is an advanced multi-agent AI system featuring **15 specialized agents** t
 - 🔄 **Dynamic Topology** - Self-organizing agent networks
 - 💡 **Emergent Intelligence** - Complex problem-solving through collaboration
 
+---
+
 ## 🚀 Quick Start
 
 ### Prerequisites
+
 - Python 3.9+
 - OpenAI API key
 - Virtual environment (recommended)
+
+---
 
 ### Installation
 
@@ -52,6 +61,8 @@ cp .env.example .env
 python scripts/run_experiment.py "Analyze the benefits of renewable energy" --verbose
 ```
 
+---
+
 ## 🏗️ Architecture
 
 ### Three-Layer Intelligence Stack
@@ -71,9 +82,12 @@ python scripts/run_experiment.py "Analyze the benefits of renewable energy" --ve
 - **Checker Semantic** - Meaning and context accuracy  
 - **Checker Consistency** - Cross-claim coherence analysis
 
+---
+
 ## 💫 Usage Examples
 
 ### Basic Usage
+
 ```bash
 # Simple analysis
 python scripts/run_experiment.py "What are the implications of quantum computing?"
@@ -85,7 +99,10 @@ python scripts/run_experiment.py "Design a sustainable transportation system" --
 python scripts/run_experiment.py "How might we solve the global water crisis?" --max-hops 15
 ```
 
+---
+
 ### Advanced Features
+
 ```bash
 # With comprehensive monitoring
 python scripts/run_experiment.py "Analyze ethical implications of AGI" --verbose
@@ -97,6 +114,8 @@ python scripts/run_experiment.py batch tasks.json --output-dir results/
 python test_agents.py
 ```
 
+---
+
 ## 📊 What You Get
 
 - **🎯 Multi-perspective Analysis** - Each proposer brings unique viewpoints
@@ -104,6 +123,8 @@ python test_agents.py
 - **📈 Performance Metrics** - Token usage, timing, and cost analysis
 - **🧬 Evolution Insights** - How agents improve over time
 - **📄 Comprehensive Reports** - JSON exports for further analysis
+
+---
 
 ## 🔍 LangSmith Integration
 
@@ -123,9 +144,12 @@ LANGSMITH_PROJECT=SEFAS-MultiAgent-System
 - 🐛 Debug complex workflows
 - 💰 Cost optimization
 
+---
+
 ## 🛠️ Development
 
 ### Testing & Quality
+
 ```bash
 make test                    # All tests
 make test-unit              # Unit tests only
@@ -133,14 +157,20 @@ make test-integration       # Integration tests
 python test_agents.py       # Full system validation
 ```
 
+---
+
 ### Code Quality
+
 ```bash
 make lint                   # ruff + mypy
 make format                 # ruff format + black
 make clean                  # Remove cache files
 ```
 
+---
+
 ### Development Workflow
+
 ```bash
 # Run with debugging
 python scripts/run_experiment.py "test task" --verbose
@@ -153,26 +183,37 @@ tail -f logs/agents.log     # Agent executions
 ls data/reports/            # Saved analysis reports
 ```
 
+---
+
 ## 🌟 Why SEFAS?
 
 ### Next-Generation AI Architecture
+
 SEFAS represents the future of artificial intelligence by combining:
+
 - 🧬 **Evolutionary adaptation** that makes agents smarter over time
 - 🌐 **Federated intelligence** that mirrors human collaboration
 - 📊 **Enterprise monitoring** for production deployments
 - 🔧 **Extensible design** for custom development
 
+---
+
 ### Perfect For
+
 - 🔬 **Research Teams** - Exploring multi-agent AI and emergence
 - 🏢 **Enterprises** - Complex problem-solving workflows  
 - 🎓 **Educators** - Teaching advanced AI concepts
 - 💻 **Developers** - Building sophisticated AI applications
+
+---
 
 ## 📞 Support
 
 - 🐛 **Issues**: [GitHub Issues](https://github.com/keef75/SEFAS/issues)
 - 💬 **Discussions**: [GitHub Discussions](https://github.com/keef75/SEFAS/discussions)  
 - 📧 **Contact**: Open an issue for questions or collaboration
+
+---
 
 ## 📄 License
 
