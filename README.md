@@ -184,7 +184,7 @@ This project is licensed under the MIT License.
 
 **⚡ SEFAS - Where AI Agents Evolve Together ⚡**
 
-*Built with ❤️ by the AI research community*
+*Built with ❤️ by the K3ith.AI and Cocoa AI research*
 
 [![Star this repo](https://img.shields.io/github/stars/keef75/SEFAS?style=social)](https://github.com/keef75/SEFAS)
 
