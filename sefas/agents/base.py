@@ -328,9 +328,28 @@ class SelfEvolvingAgent(ABC):
         if len(self.evolution_state.performance_history) > 100:
             self.evolution_state.performance_history = self.evolution_state.performance_history[-100:]
     
-    def _extract_confidence(self, text: str) -> float:
-        """Extract confidence from text response"""
+    def _extract_confidence(self, text) -> float:
+        """Extract confidence from text response with improved calibration"""
         import re
+        
+        # CRITICAL FIX: Handle dict inputs safely
+        if isinstance(text, dict):
+            # If it's a dict, try to extract string content first
+            for key in ['content', 'proposal', 'analysis', 'text', 'response', 'description']:
+                if key in text and isinstance(text[key], str):
+                    text_str = text[key]
+                    break
+            else:
+                # If no string content found, check for direct confidence
+                if 'confidence' in text:
+                    try:
+                        return float(text['confidence'])
+                    except (ValueError, TypeError):
+                        pass
+                # Last resort: convert to string
+                text_str = str(text)
+        else:
+            text_str = str(text)
         
         # Look for confidence patterns
         patterns = [
@@ -338,22 +357,52 @@ class SelfEvolvingAgent(ABC):
             r'([0-9.]+)\s*confidence',
             r'confident[:\s]+([0-9.]+)',
             r'certainty[:\s]+([0-9.]+)',
-            r'score[:\s]+([0-9.]+)'
+            r'score[:\s]+([0-9.]+)',
+            r'belief[:\s]+([0-9.]+)',
+            r'sure[:\s]+([0-9.]+)',
+            r'probability[:\s]+([0-9.]+)'
         ]
         
+        extracted_confidence = None
         for pattern in patterns:
-            match = re.search(pattern, text.lower())
+            match = re.search(pattern, text_str.lower())
             if match:
                 try:
                     value = float(match.group(1))
                     # Normalize to 0-1 range
                     if value > 1.0:
                         value = value / 100.0  # Assume percentage
-                    return min(max(value, 0.0), 1.0)
+                    extracted_confidence = min(max(value, 0.0), 1.0)
+                    break
                 except:
                     pass
         
-        return 0.5  # Default confidence
+        # If no explicit confidence found, estimate from text quality
+        if extracted_confidence is None:
+            # Use text indicators to estimate confidence
+            text_lower = text_str.lower()
+            
+            # Positive indicators
+            positive_indicators = ['definitely', 'clearly', 'certainly', 'obviously', 'undoubtedly']
+            negative_indicators = ['might', 'maybe', 'possibly', 'perhaps', 'unclear', 'uncertain']
+            
+            positive_count = sum(1 for indicator in positive_indicators if indicator in text_lower)
+            negative_count = sum(1 for indicator in negative_indicators if indicator in text_lower)
+            
+            # Base confidence on text length and quality indicators
+            base_confidence = min(0.8, 0.3 + len(text) / 1000.0)
+            
+            # Adjust based on indicators
+            confidence_adjustment = (positive_count * 0.1) - (negative_count * 0.15)
+            extracted_confidence = max(0.2, min(0.9, base_confidence + confidence_adjustment))
+        
+        # Apply agent fitness-based calibration
+        if hasattr(self, 'evolution_state') and self.evolution_state.fitness_score > 0:
+            # Higher fitness agents should have slightly higher baseline confidence
+            fitness_bonus = (self.evolution_state.fitness_score - 0.5) * 0.1
+            extracted_confidence = max(0.2, min(0.95, extracted_confidence + fitness_bonus))
+        
+        return extracted_confidence
     
     def get_report(self) -> Optional[AgentReport]:
         """Get the last execution report"""

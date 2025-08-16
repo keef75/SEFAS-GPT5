@@ -92,6 +92,9 @@ python scripts/run_experiment.py "Your task" --verbose
 # Environment variable debugging (common API key issues)
 unset OPENAI_API_KEY && python scripts/run_experiment.py "test task"
 
+# Debug validation layer issues
+python test_confidence_calibration.py  # Test belief propagation improvements
+
 # Check logs
 tail -f logs/sefas.log      # Real-time system logs
 tail -f logs/agents.log     # Agent execution logs  
@@ -105,8 +108,10 @@ ls data/reports/            # Saved execution reports (JSON format)
 
 ### Reliability & Redundancy Systems
 - **`sefas/core/redundancy.py`**: Industrial-grade redundancy orchestrator with circuit breakers, hedged requests, and N-version programming
-- **`sefas/core/validation.py`**: Enhanced validator pool with quorum-based consensus and comprehensive error handling  
-- **`sefas/core/belief_propagation.py`**: Advanced belief propagation engine with convergence detection and confidence weighting
+- **`sefas/core/validation.py`**: Enhanced validator pool with quorum-based consensus and comprehensive error handling (⚠️ integration issue)
+- **`sefas/core/belief_propagation.py`**: Advanced belief propagation engine with enhanced confidence calibration
+- **`sefas/core/contracts.py`**: Pydantic models for type-safe inter-agent communication
+- **`sefas/core/circuit_breaker.py`**: Fault tolerance with automatic failure detection and recovery
 
 ### Agent Management & Configuration
 - **`sefas/agents/factory.py`**: Dynamic agent factory supporting 17+ agents with DynamicAgent class for flexible roles
@@ -220,29 +225,42 @@ ls data/reports/            # Saved execution reports (JSON format)
 3. LangChain clients read from OS environment variables
 4. Missing step 2 causes 401 errors even with valid API keys
 
-## Recent System Enhancements
+## Critical System Status: Post-Validation Layer Issue
 
-### Belief Propagation Engine Improvements
-**Enhanced History Tracking**: The belief propagation system now maintains comprehensive execution history with the `get_propagation_history()` method, enabling detailed evolution reporting and system performance analysis.
+### Known Critical Issues
 
-**Key Components**:
-- **Propagation History**: Records timestamp, iterations, convergence status, system confidence, and consensus results for each propagation run
-- **Agent Performance Insights**: Analyzes agent contributions by role with confidence deltas and performance trends (improving/declining/stable)  
-- **Evolution Integration**: Full integration with evolution reporting system for fitness tracking and system optimization
+**Validation Type Mismatch Regression**: Despite implementing comprehensive fixes, the system still experiences validation layer errors:
+```
+ERROR sefas.core.validation: Circuit breaker recorded failure for validator Logic Validation Engine: 
+Validation failed: expected string or bytes-like object, got 'dict'
+```
 
-### Evolution Reporting System
-**Complete Evolution Tracking**: The system now provides comprehensive evolution reports via `get_evolution_report()` method in the executor, including:
-- Total executions and evolution events
-- Agent fitness scores across all 17 agents
-- Belief propagation run counts and convergence analysis
-- Evolution rate calculations and performance trends
+**Impact**: 
+- 0.0% verification pass rate 
+- No consensus reached despite reasonable proposals
+- Evolution disabled due to validation failures
+- System effectively running without validation layer
+
+**Status**: The confidence calibration improvements are working (mean confidence improved from 41.11% to 52.98%), but validation integration remains broken.
+
+### Recent System Enhancements
+
+**Confidence Calibration Improvements**: Successfully implemented enhanced belief propagation with:
+- Weighted confidence aggregation instead of simple addition
+- Conservative system confidence calculation using harmonic mean
+- Better validation influence with boost/penalty system
+- Improved confidence extraction from agent responses
+
+**Circuit Breaker Implementation**: Fully operational fault isolation system preventing cascade failures with automatic recovery mechanisms.
+
+**Pydantic Contracts System**: Created comprehensive type-safe contracts for inter-agent communication, though integration with validation layer needs completion.
 
 ### Reliability Patterns Implementation Status
 - **✅ N-Version Programming**: Fully operational with 5-agent diversity for exponential error reduction
-- **✅ Circuit Breakers**: Complete fault isolation with automatic recovery mechanisms
+- **✅ Circuit Breakers**: Complete fault isolation with automatic recovery mechanisms  
 - **✅ Hedged Requests**: Tail latency reduction through concurrent execution patterns
-- **✅ Quorum Validation**: 3+ validator consensus with intelligent fallback systems
-- **✅ Belief Propagation**: LDPC-style consensus with convergence detection and confidence weighting
+- **⚠️ Quorum Validation**: Partially working - circuit breakers protect but validation input preparation bypassed
+- **✅ Belief Propagation**: Enhanced LDPC-style consensus with improved confidence calibration
 
 ## Error Handling Patterns
 - **Defensive Variable Initialization**: All execution variables initialized with safe defaults before try blocks to prevent KeyError in exception handlers
@@ -256,6 +274,15 @@ ls data/reports/            # Saved execution reports (JSON format)
 
 ## Common Debugging Scenarios
 
+### Validation Type Mismatch Errors (CRITICAL)
+**Issue**: `expected string or bytes-like object, got 'dict'` in validation layer
+**Root Cause**: Validation input preparation bypass - `prepare_validation_input()` not being called in execution path
+**Immediate Action**: 
+1. Trace validation call path in `sefas/workflows/executor.py`
+2. Ensure `prepare_validation_input()` from contracts is used
+3. Verify CheckerAgent.execute() override is properly called
+4. Test with `python test_confidence_calibration.py`
+
 ### AttributeError: Missing Methods
 **Issue**: Missing methods in core components (e.g., `get_propagation_history()`)
 **Solution**: Check that all core components in `sefas/core/` have required methods. The belief propagation engine requires:
@@ -263,12 +290,10 @@ ls data/reports/            # Saved execution reports (JSON format)
 - `get_agent_performance_insights()` for agent analysis
 - Proper history tracking in `propagate()` method
 
-### Evolution Report Generation Failures
-**Issue**: Evolution reports fail with missing data errors
-**Solution**: Ensure the `FederatedSystemRunner.get_evolution_report()` method can access:
-- Belief propagation history via `self.belief_engine.get_propagation_history()`
-- Agent fitness scores from `agent.evolution_state.fitness_score`
-- Execution history from `self.execution_history`
+### Circuit Breaker Open States
+**Issue**: All validators showing "Circuit breaker is OPEN" warnings
+**Root Cause**: Validators failing repeatedly due to type mismatch errors
+**Solution**: Fix the validation input preparation issue first, then reset circuit breakers
 
 ### Agent Configuration Errors
 **Issue**: Agent initialization failures or missing roles

@@ -10,6 +10,13 @@ from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
 from datetime import datetime
 
+from sefas.core.circuit_breaker import (
+    circuit_breaker_manager, 
+    CircuitBreakerOpenError, 
+    CircuitBreakerExecutionError,
+    CircuitBreakerConfig
+)
+
 logger = logging.getLogger(__name__)
 
 class ValidationResult(BaseModel):
@@ -338,31 +345,99 @@ class ValidatorPool:
         )
     
     async def _validate_with_agent(self, agent, claim: Dict) -> ValidationResult:
-        """Validate using an agent-based validator"""
+        """Validate using an agent-based validator with circuit breaker protection"""
+        agent_name = getattr(agent, 'name', getattr(agent, 'role', 'agent_validator'))
+        breaker_name = f"validator_{agent_name}"
+        
+        # Configure circuit breaker for this validator
+        config = CircuitBreakerConfig(
+            failure_threshold=2,  # Lower threshold for validators
+            reset_timeout=30.0,   # Shorter reset time
+            half_open_max_calls=2,
+            success_threshold=1
+        )
+        
         try:
-            # Prepare task for agent
-            validation_task = {
-                'description': f"Validate this claim: {claim.get('content', '')}",
-                'type': 'validation',
-                'claim_data': claim
-            }
+            # Execute with circuit breaker protection
+            async def execute_validation():
+                # Import the input preparation function
+                from sefas.core.contracts import prepare_validation_input, create_validation_task
+                
+                # THE CRITICAL FIX - Use proper input preparation
+                prepared_content = prepare_validation_input(claim)
+                
+                # Create proper validation task structure
+                validation_task = {
+                    'description': f"Validate this claim: {prepared_content[:100]}...",
+                    'type': 'verification',  # CheckerAgent expects 'verification' type
+                    'proposal': claim,  # Pass original claim for context
+                    'claim_data': {
+                        'content': prepared_content,  # This is now a STRING!
+                        'claim_id': claim.get('claim_id', 'unknown'),
+                        'confidence': claim.get('confidence', 0.5)
+                    }
+                }
+                
+                # Execute validation through agent (async)
+                result = agent.execute(validation_task)
+                if asyncio.iscoroutine(result):
+                    result = await result
+                
+                # Check for validation errors
+                if 'error' in result or result.get('confidence', 0) == 0.0:
+                    raise ValueError(f"Validation failed: {result.get('error', 'Low confidence')}")
+                
+                return result
             
-            # Execute validation through agent
-            result = agent.execute(validation_task)
-            if asyncio.iscoroutine(result):
-                result = await result
+            result = await circuit_breaker_manager.execute_with_breaker_async(
+                breaker_name, execute_validation
+            )
             
             # Parse agent response into ValidationResult
             confidence = result.get('confidence', 0.5)
-            is_valid = confidence > 0.5  # Simple threshold
-            evidence = result.get('reasoning', result.get('proposal', ''))
+            
+            # Handle verification result properly
+            verification = result.get('verification', {})
+            if verification:
+                is_valid = verification.get('passed', confidence > 0.5)
+                overall_score = verification.get('overall_score', confidence)
+                evidence = verification.get('details', result.get('summary', ''))
+            else:
+                is_valid = confidence > 0.5  # Simple threshold
+                overall_score = confidence
+                evidence = result.get('reasoning', result.get('summary', result.get('proposal', '')))
+            
+            # Extract any issues found
+            issues = result.get('issues', [])
+            if isinstance(issues, str):
+                issues = [issues]
             
             return ValidationResult(
                 valid=is_valid,
-                confidence=confidence,
+                confidence=overall_score,
                 evidence=evidence,
-                errors=[],
-                validator_id=getattr(agent, 'name', 'agent_validator')
+                errors=issues,
+                validator_id=agent_name
+            )
+            
+        except CircuitBreakerOpenError:
+            logger.warning(f"Circuit breaker is OPEN for validator {agent_name}")
+            return ValidationResult(
+                valid=False,
+                confidence=0.0,
+                evidence=f"Validator {agent_name} unavailable (circuit breaker OPEN)",
+                errors=["Circuit breaker protection active"],
+                validator_id=agent_name
+            )
+            
+        except CircuitBreakerExecutionError as e:
+            logger.error(f"Circuit breaker recorded failure for validator {agent_name}: {e}")
+            return ValidationResult(
+                valid=False,
+                confidence=0.0,
+                evidence=f"Validation failed: {str(e)}",
+                errors=[str(e)],
+                validator_id=agent_name
             )
             
         except Exception as e:
@@ -372,5 +447,5 @@ class ValidatorPool:
                 confidence=0.0,
                 evidence=f"Validation error: {str(e)}",
                 errors=[str(e)],
-                validator_id=getattr(agent, 'name', 'agent_validator')
+                validator_id=agent_name
             )

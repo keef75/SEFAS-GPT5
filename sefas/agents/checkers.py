@@ -4,9 +4,49 @@ import json
 import re
 from typing import Dict, Any, List
 from sefas.agents.base import SelfEvolvingAgent
+from sefas.core.contracts import ValidationInput, ValidationResult, prepare_validation_input, create_validation_task
 
 class CheckerAgent(SelfEvolvingAgent):
     """Base agent for validation and checking"""
+    
+    def execute(self, task: Dict[str, Any], context: Dict[str, Any] = None, **kwargs) -> Dict[str, Any]:
+        """Execute validation with proper input handling"""
+        
+        # Extract validation content properly
+        if task.get('type') == 'verification' and 'proposal' in task:
+            # This is a verification task with a proposal
+            validation_content = prepare_validation_input(task['proposal'])
+            
+            # Create a proper validation task
+            validation_task = {
+                'description': f"Validate: {validation_content[:100]}...",
+                'content': validation_content,
+                'type': 'validation',
+                'context': context or {},
+                'original_proposal': task['proposal']
+            }
+        else:
+            # Handle other task types
+            validation_content = prepare_validation_input(task)
+            validation_task = {
+                'description': task.get('description', validation_content[:100] + '...'),
+                'content': validation_content,
+                'type': 'validation',
+                'context': context or {}
+            }
+        
+        # Call parent execute with the properly formatted task
+        result = super().execute(validation_task, context, **kwargs)
+        
+        # Ensure result has required validation fields
+        if 'verification' not in result:
+            result['verification'] = {
+                'overall_score': result.get('confidence', 0.5),
+                'passed': result.get('confidence', 0.5) > 0.6,
+                'details': result.get('summary', 'Validation completed')
+            }
+        
+        return result
     
     def _parse_response(self, response: str) -> Dict[str, Any]:
         """Parse checker response"""
@@ -61,8 +101,21 @@ class CheckerAgent(SelfEvolvingAgent):
             "checker_type": self.role
         }
     
-    def _extract_score(self, text: str) -> float:
+    def _extract_score(self, text) -> float:
         """Extract numerical score from text"""
+        # CRITICAL FIX: Handle dict inputs safely
+        if isinstance(text, dict):
+            # Try to extract string content first
+            for key in ['content', 'proposal', 'analysis', 'text', 'response', 'description']:
+                if key in text and isinstance(text[key], str):
+                    text_str = text[key]
+                    break
+            else:
+                # Convert to string
+                text_str = str(text)
+        else:
+            text_str = str(text)
+        
         # Look for score patterns
         score_patterns = [
             r'score[:\s]+([0-9.]+)',
@@ -73,7 +126,7 @@ class CheckerAgent(SelfEvolvingAgent):
         ]
         
         for pattern in score_patterns:
-            match = re.search(pattern, text.lower())
+            match = re.search(pattern, text_str.lower())
             if match:
                 try:
                     value = float(match.group(1))
@@ -85,10 +138,23 @@ class CheckerAgent(SelfEvolvingAgent):
                     pass
         
         # Fallback: use confidence score
-        return self._extract_confidence(text)
+        return self._extract_confidence(text_str)
     
-    def _extract_aspect_scores(self, text: str) -> Dict[str, float]:
+    def _extract_aspect_scores(self, text) -> Dict[str, float]:
         """Extract scores for individual validation aspects"""
+        # CRITICAL FIX: Handle dict inputs safely
+        if isinstance(text, dict):
+            # Try to extract string content first
+            for key in ['content', 'proposal', 'analysis', 'text', 'response', 'description']:
+                if key in text and isinstance(text[key], str):
+                    text_str = text[key]
+                    break
+            else:
+                # Convert to string
+                text_str = str(text)
+        else:
+            text_str = str(text)
+        
         aspects = {}
         
         # Common validation aspects
@@ -105,7 +171,7 @@ class CheckerAgent(SelfEvolvingAgent):
             for keyword in keywords:
                 # Look for scores associated with keywords
                 pattern = f'{keyword}[:\\\\s]+([0-9.]+)'
-                match = re.search(pattern, text.lower())
+                match = re.search(pattern, text_str.lower())
                 if match:
                     try:
                         score = float(match.group(1))
@@ -118,8 +184,21 @@ class CheckerAgent(SelfEvolvingAgent):
         
         return aspects
     
-    def _extract_issues(self, text: str) -> List[str]:
+    def _extract_issues(self, text) -> List[str]:
         """Extract identified issues from text"""
+        # CRITICAL FIX: Handle dict inputs safely
+        if isinstance(text, dict):
+            # Try to extract string content first
+            for key in ['content', 'proposal', 'analysis', 'text', 'response', 'description']:
+                if key in text and isinstance(text[key], str):
+                    text_str = text[key]
+                    break
+            else:
+                # Convert to string
+                text_str = str(text)
+        else:
+            text_str = str(text)
+        
         issues = []
         
         # Look for issue indicators
@@ -132,13 +211,13 @@ class CheckerAgent(SelfEvolvingAgent):
         ]
         
         for pattern in issue_patterns:
-            matches = re.findall(pattern, text, re.IGNORECASE)
+            matches = re.findall(pattern, text_str, re.IGNORECASE)
             for match in matches:
                 if len(match.strip()) > 10:
                     issues.append(match.strip())
         
         # Look for bullet-pointed issues
-        lines = text.split('\n')
+        lines = text_str.split('\n')
         in_issues_section = False
         
         for line in lines:
@@ -156,8 +235,21 @@ class CheckerAgent(SelfEvolvingAgent):
         
         return issues[:5]  # Limit to 5 issues
     
-    def _extract_recommendations(self, text: str) -> List[str]:
+    def _extract_recommendations(self, text) -> List[str]:
         """Extract recommendations from text"""
+        # CRITICAL FIX: Handle dict inputs safely
+        if isinstance(text, dict):
+            # Try to extract string content first
+            for key in ['content', 'proposal', 'analysis', 'text', 'response', 'description']:
+                if key in text and isinstance(text[key], str):
+                    text_str = text[key]
+                    break
+            else:
+                # Convert to string
+                text_str = str(text)
+        else:
+            text_str = str(text)
+        
         recommendations = []
         
         # Look for recommendation patterns
@@ -169,7 +261,7 @@ class CheckerAgent(SelfEvolvingAgent):
         ]
         
         for pattern in rec_patterns:
-            matches = re.findall(pattern, text, re.IGNORECASE)
+            matches = re.findall(pattern, text_str, re.IGNORECASE)
             for match in matches:
                 if len(match.strip()) > 10:
                     recommendations.append(match.strip())

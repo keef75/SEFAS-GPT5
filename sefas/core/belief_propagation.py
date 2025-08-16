@@ -22,21 +22,29 @@ class BeliefNode(BaseModel):
 
 class BeliefPropagationEngine:
     """
-    Implements LDPC-style belief propagation for federated consensus.
-    Exponentially reduces error rates through structured redundancy.
+    Implements stabilized LDPC-style belief propagation for federated consensus.
+    Exponentially reduces error rates through structured redundancy with oscillation detection.
     """
     
     def __init__(
         self,
-        damping_factor: float = 0.5,
-        convergence_threshold: float = 0.01,
-        max_iterations: int = 20,
-        min_confidence: float = 0.7
+        damping_factor: float = 0.7,  # Balanced for speed and stability
+        convergence_threshold: float = 1e-3,  # Slightly relaxed for faster convergence
+        max_iterations: int = 50,  # More iterations allowed
+        min_confidence: float = 0.5,
+        use_log_domain: bool = True  # For numerical stability
     ):
         self.damping_factor = damping_factor
         self.convergence_threshold = convergence_threshold
         self.max_iterations = max_iterations
         self.min_confidence = min_confidence
+        self.use_log_domain = use_log_domain
+        
+        # Stability tracking
+        self.oscillation_history: List[float] = []
+        self.adaptive_damping = damping_factor
+        self.patience_counter = 0
+        self.last_delta = float('inf')
         
         # Belief states
         self.beliefs: Dict[str, BeliefNode] = {}
@@ -53,15 +61,18 @@ class BeliefPropagationEngine:
         
         node = self.beliefs[claim_id]
         
-        # Accumulate evidence with agent confidence weighting
+        # Use proper confidence aggregation instead of simple addition
         if content not in node.candidates:
-            node.candidates[content] = 0.0
+            node.candidates[content] = confidence
+        else:
+            # Weighted average of existing and new confidence
+            existing_conf = node.candidates[content]
+            # Higher weight to new evidence encourages learning
+            node.candidates[content] = (existing_conf * 0.6) + (confidence * 0.4)
         
-        # Weight by confidence and add
-        node.candidates[content] += confidence
         node.evidence_count += 1
         
-        logger.info(f"Added proposal for {claim_id} from {agent_id}: confidence={confidence:.2f}")
+        logger.info(f"Added proposal for {claim_id} from {agent_id}: confidence={confidence:.2f} -> {node.candidates[content]:.2f}")
     
     async def add_validation(self, claim_id: str, validator_id: str, result: Dict):
         """Add validation result from a checker"""
@@ -75,45 +86,73 @@ class BeliefPropagationEngine:
         logger.info(f"Added validation for {claim_id} from {validator_id}: {result.get('confidence', 0.5):.2f}")
     
     def normalize_beliefs(self):
-        """Normalize probability distributions"""
+        """Normalize probability distributions while preserving confidence relationships"""
         for node in self.beliefs.values():
-            total = sum(node.candidates.values())
-            if total > 0:
-                for content in node.candidates:
-                    node.candidates[content] /= total
+            if not node.candidates:
+                continue
+                
+            # Find the current max to preserve relative relationships
+            max_confidence = max(node.candidates.values())
             
-            # Update node confidence as max probability
-            if node.candidates:
-                node.confidence = max(node.candidates.values())
+            # Only normalize if values exceed 1.0 to preserve confidence scale
+            if max_confidence > 1.0:
+                normalization_factor = 1.0 / max_confidence
+                for content in node.candidates:
+                    node.candidates[content] *= normalization_factor
+            
+            # Update node confidence as max probability (after normalization)
+            node.confidence = max(node.candidates.values())
     
     async def propagate(self) -> Dict[str, Any]:
         """
-        Run belief propagation until convergence.
+        Run stabilized belief propagation with oscillation detection until convergence.
         Returns consensus results with confidence scores.
         """
-        logger.info(f"Starting belief propagation with {len(self.beliefs)} nodes")
+        logger.info(f"Starting stabilized belief propagation with {len(self.beliefs)} nodes")
+        
+        # Reset stability tracking
+        self.oscillation_history = []
+        self.adaptive_damping = self.damping_factor
+        self.patience_counter = 0
+        self.last_delta = float('inf')
         
         # Initial normalization
         self.normalize_beliefs()
         
+        # Initialize beliefs in log domain if requested
+        if self.use_log_domain:
+            beliefs_log = self._initialize_log_beliefs()
+        else:
+            beliefs_log = self._copy_beliefs()
+            
         converged = False
         iteration = 0
         
         while not converged and iteration < self.max_iterations:
             old_beliefs = self._copy_beliefs()
             
-            # Message passing phase
-            await self._update_messages()
+            # Message passing phase with damping
+            await self._update_messages_with_damping(old_beliefs)
             
             # Belief update phase
             self._update_beliefs()
             
-            # Check convergence
+            # Check convergence and oscillation
             max_delta = self._compute_max_delta(old_beliefs)
-            converged = max_delta < self.convergence_threshold
+            self.oscillation_history.append(max_delta)
+            
+            # Detect oscillation and adapt
+            if self._detect_oscillation():
+                logger.warning(f"Oscillation detected at iteration {iteration}")
+                self.adaptive_damping = min(0.95, self.adaptive_damping + 0.1)
+                # Apply emergency stabilization
+                self._apply_min_sum_stabilization()
+            
+            # Early stopping with patience
+            converged = self._should_stop(max_delta, iteration)
             
             iteration += 1
-            logger.info(f"Iteration {iteration}: max_delta={max_delta:.4f}, converged={converged}")
+            logger.info(f"Iteration {iteration}: max_delta={max_delta:.6f}, damping={self.adaptive_damping:.2f}, converged={converged}")
         
         # Extract consensus
         consensus = self._extract_consensus()
@@ -129,16 +168,25 @@ class BeliefPropagationEngine:
             'system_confidence': system_confidence,
             'num_beliefs': len(self.beliefs),
             'num_validations': sum(len(v) for v in self.check_results.values()),
-            'final_consensus': consensus
+            'final_consensus': consensus,
+            'oscillation_detected': len(self.oscillation_history) > 6 and self._detect_oscillation(),
+            'final_damping': self.adaptive_damping
         }
         self.propagation_history.append(propagation_record)
+        
+        if not converged:
+            logger.warning(f"BP did not converge after {iteration} iterations - using best estimate")
+        else:
+            logger.info(f"BP converged successfully in {iteration} iterations")
         
         return {
             'consensus': consensus,
             'system_confidence': system_confidence,
             'iterations': iteration,
             'converged': converged,
-            'beliefs': {k: v.dict() for k, v in self.beliefs.items()}
+            'beliefs': {k: v.dict() for k, v in self.beliefs.items()},
+            'oscillation_detected': propagation_record['oscillation_detected'],
+            'final_damping': self.adaptive_damping
         }
     
     async def _update_messages(self):
@@ -150,21 +198,43 @@ class BeliefPropagationEngine:
                 
             node = self.beliefs[claim_id]
             
+            # Calculate average validation confidence for this claim
+            total_validation_conf = 0.0
+            positive_validations = 0
+            total_validations = len(validations)
+            
             for validation in validations:
-                # Checker confidence influences belief
                 checker_conf = validation['confidence']
                 is_valid = validation['valid']
                 
-                # Apply checker influence with damping
+                total_validation_conf += checker_conf
+                if is_valid:
+                    positive_validations += 1
+            
+            if total_validations > 0:
+                avg_validation_conf = total_validation_conf / total_validations
+                validation_success_rate = positive_validations / total_validations
+                
+                # Apply validation influence more meaningfully
+                validation_multiplier = avg_validation_conf * validation_success_rate
+                
+                # Update all candidates based on validation results
                 for content in node.candidates:
-                    # Positive validation increases probability
-                    if is_valid:
-                        boost = checker_conf * 0.1 * self.damping_factor
-                        node.candidates[content] += boost
+                    current_conf = node.candidates[content]
+                    
+                    # Apply more conservative validation influence
+                    if validation_success_rate > 0.6 and avg_validation_conf > 0.6:
+                        # Modest boost for strong positive validation
+                        boost_factor = 1.0 + (validation_multiplier * 0.15)
+                        node.candidates[content] = min(0.95, current_conf * boost_factor)
+                    elif validation_success_rate < 0.4 or avg_validation_conf < 0.4:
+                        # Modest penalty for poor validation
+                        penalty_factor = 1.0 - (validation_multiplier * 0.1)
+                        node.candidates[content] = max(0.15, current_conf * penalty_factor)
+                    # For moderate validation, apply small adjustment
                     else:
-                        # Negative validation decreases probability
-                        penalty = (1 - checker_conf) * 0.1 * self.damping_factor
-                        node.candidates[content] = max(0, node.candidates[content] - penalty)
+                        adjustment = (validation_success_rate - 0.5) * 0.05
+                        node.candidates[content] = max(0.15, min(0.95, current_conf + adjustment))
         
         # Re-normalize after message passing
         self.normalize_beliefs()
@@ -235,18 +305,26 @@ class BeliefPropagationEngine:
         if not self.beliefs:
             return 0.0
         
-        confidences = [node.confidence for node in self.beliefs.values()]
-        
-        # Weighted average with penalty for non-converged nodes
-        total_conf = 0.0
-        total_weight = 0.0
+        # Use harmonic mean of confidences to be more conservative
+        # This prevents one high confidence from inflating system confidence
+        harmonic_sum = 0.0
+        num_beliefs = 0
         
         for node in self.beliefs.values():
-            weight = 1.0 if node.converged else 0.5
-            total_conf += node.confidence * weight
-            total_weight += weight
+            if node.confidence > 0.0:  # Avoid division by zero
+                harmonic_sum += 1.0 / node.confidence
+                num_beliefs += 1
         
-        return total_conf / total_weight if total_weight > 0 else 0.0
+        if num_beliefs == 0:
+            return 0.0
+        
+        harmonic_mean = num_beliefs / harmonic_sum
+        
+        # Apply convergence bonus (small)
+        converged_count = sum(1 for node in self.beliefs.values() if node.converged)
+        convergence_bonus = 0.05 * (converged_count / len(self.beliefs))
+        
+        return min(1.0, harmonic_mean + convergence_bonus)
     
     def get_propagation_history(self) -> List[Dict[str, Any]]:
         """Return the history of propagation runs"""
@@ -298,3 +376,128 @@ class BeliefPropagationEngine:
             }
         
         return insights
+    
+    def _initialize_log_beliefs(self) -> Dict[str, Dict[str, float]]:
+        """Initialize beliefs in log domain for numerical stability"""
+        log_beliefs = {}
+        for claim_id, node in self.beliefs.items():
+            log_beliefs[claim_id] = {}
+            for content, prob in node.candidates.items():
+                # Convert to log domain, handling edge cases
+                if prob <= 0:
+                    log_beliefs[claim_id][content] = -1e10  # Very small log probability
+                else:
+                    log_beliefs[claim_id][content] = np.log(prob)
+        return log_beliefs
+    
+    async def _update_messages_with_damping(self, old_beliefs: Dict[str, Dict[str, float]]):
+        """Update messages with adaptive damping for stability"""
+        # First, update messages normally
+        await self._update_messages()
+        
+        # Then apply damping to smooth changes
+        for claim_id, node in self.beliefs.items():
+            if claim_id not in old_beliefs:
+                continue
+                
+            old_candidates = old_beliefs[claim_id]
+            
+            for content in node.candidates:
+                if content in old_candidates:
+                    old_value = old_candidates[content]
+                    new_value = node.candidates[content]
+                    
+                    # Apply adaptive damping
+                    damped_value = (
+                        self.adaptive_damping * old_value +
+                        (1 - self.adaptive_damping) * new_value
+                    )
+                    
+                    node.candidates[content] = damped_value
+        
+        # Re-normalize after damping
+        self.normalize_beliefs()
+    
+    def _detect_oscillation(self) -> bool:
+        """Detect period-2 or period-3 oscillations in convergence"""
+        if len(self.oscillation_history) < 6:
+            return False
+        
+        recent = self.oscillation_history[-6:]
+        
+        # Check for A-B-A-B pattern (period-2)
+        if (abs(recent[0] - recent[2]) < 1e-6 and 
+            abs(recent[1] - recent[3]) < 1e-6 and
+            abs(recent[2] - recent[4]) < 1e-6 and
+            abs(recent[3] - recent[5]) < 1e-6):
+            logger.debug("Period-2 oscillation detected")
+            return True
+            
+        # Check for A-B-C-A-B-C pattern (period-3)
+        if (abs(recent[0] - recent[3]) < 1e-6 and
+            abs(recent[1] - recent[4]) < 1e-6 and
+            abs(recent[2] - recent[5]) < 1e-6):
+            logger.debug("Period-3 oscillation detected")
+            return True
+        
+        # Check for stagnation (no improvement)
+        if len(recent) >= 4:
+            variance = np.var(recent[-4:])
+            if variance < 1e-10:  # Very low variance indicates stagnation
+                logger.debug("Stagnation detected")
+                return True
+                
+        return False
+    
+    def _should_stop(self, delta: float, iteration: int) -> bool:
+        """Determine if BP should stop based on convergence and patience"""
+        # Primary convergence check
+        if delta < self.convergence_threshold:
+            return True
+        
+        # Patience mechanism - stop if no improvement for several iterations
+        if delta >= self.last_delta * 0.99:  # No significant improvement
+            self.patience_counter += 1
+        else:
+            self.patience_counter = 0
+        
+        # Stop if no improvement for 5 consecutive iterations
+        if self.patience_counter >= 5:
+            logger.info(f"Early stopping: no improvement for {self.patience_counter} iterations")
+            return True
+        
+        # Minimum iterations check
+        if iteration < 3:
+            return False
+        
+        self.last_delta = delta
+        return False
+    
+    def _apply_min_sum_stabilization(self):
+        """Apply min-sum approximation for better numerical stability"""
+        for node in self.beliefs.values():
+            if len(node.candidates) <= 1:
+                continue
+            
+            # Convert to log domain temporarily
+            log_candidates = {}
+            for content, prob in node.candidates.items():
+                if prob > 0:
+                    log_candidates[content] = np.log(prob)
+                else:
+                    log_candidates[content] = -1e10
+            
+            # Apply min-sum approximation (take maximum in log domain)
+            max_log_prob = max(log_candidates.values())
+            
+            # Normalize in log domain
+            for content in log_candidates:
+                log_candidates[content] -= max_log_prob
+            
+            # Convert back to probability domain with better numerical stability
+            for content in node.candidates:
+                if content in log_candidates:
+                    node.candidates[content] = np.exp(log_candidates[content])
+            
+        # Re-normalize
+        self.normalize_beliefs()
