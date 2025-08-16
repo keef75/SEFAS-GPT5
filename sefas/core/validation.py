@@ -20,6 +20,7 @@ class ValidationResult(BaseModel):
     errors: List[str] = Field(default_factory=list)
     validator_id: str = ""
     timestamp: datetime = Field(default_factory=datetime.now)
+    execution_time: float = 0.0
     
 class EnhancedValidator:
     """
@@ -38,6 +39,8 @@ class EnhancedValidator:
         """
         Validate a claim using multiple strategies.
         """
+        import time
+        start_time = time.time()
         
         # Defensive initialization
         if not claim or 'content' not in claim:
@@ -46,7 +49,8 @@ class EnhancedValidator:
                 valid=False,
                 confidence=0.0,
                 evidence="Missing claim content",
-                errors=["Invalid claim structure"]
+                errors=["Invalid claim structure"],
+                execution_time=time.time() - start_time
             )
         
         content = claim.get('content', '')
@@ -105,7 +109,8 @@ class EnhancedValidator:
             confidence=avg_confidence,
             evidence=' | '.join(evidence_parts),
             errors=errors,
-            validator_id=self.validator_type
+            validator_id=self.validator_type,
+            execution_time=time.time() - start_time
         )
     
     async def _validate_logic(self, content: str) -> Dict:
