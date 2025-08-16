@@ -40,11 +40,14 @@ cp .env.example .env
 
 ### Running the System
 ```bash
-# Basic task execution
+# Basic task execution (uses default demo task)
 make run
 
-# Custom task with CLI
-python scripts/run_experiment.py run "Your task here" --max-hops 15 --verbose
+# Direct task execution (automatic 'run' command insertion)
+python scripts/run_experiment.py "Your task here" --max-hops 15 --verbose
+
+# Explicit run command
+python scripts/run_experiment.py run "Your task here" --experiment-name "test-run"
 
 # Batch experiments
 python scripts/run_experiment.py batch tasks.json --output-dir results/
@@ -160,8 +163,9 @@ ls data/reports/            # Saved execution reports (JSON format)
 - **Core State**: Fully implemented with EvolutionState and FederatedState
 - **Configuration**: Complete with environment/YAML loading and robust error handling
 - **Monitoring**: Full LangSmith integration, performance tracking, and enhanced execution reporting
-- **CLI**: Functional with multi-hop execution and comprehensive visual reporting
+- **CLI**: Functional with multi-hop execution, auto-command insertion, and comprehensive visual reporting
 - **Agent Implementations**: Working federated execution with defensive error handling
+- **Execution Reporting**: Rich terminal displays with JSON export functionality (sefas.monitoring.execution_reporter)
 - **Evolution Module**: Architecture defined, implementation pending
 - **Error Handling**: Comprehensive exception handling with partial state preservation
 
@@ -196,3 +200,9 @@ ls data/reports/            # Saved execution reports (JSON format)
 - **Belief Propagation**: Safe dictionary access prevents KeyError exceptions
 - **CLI Handling**: Empty confidence scores and missing data handled gracefully
 - **Environment Variable Conflicts**: Shell environment variables override .env files; use `unset OPENAI_API_KEY` for troubleshooting
+
+## Security and Git Handling
+- **API Key Protection**: `.env` file excluded via `.gitignore` to prevent sensitive data commits
+- **GitHub Push Protection**: System designed to pass GitHub's secret scanning with clean `.env.example` template
+- **Environment Templates**: Use `.env.example` as template with placeholder values only
+- **Commit Safety**: Repository configured to safely exclude logs/, data/reports/, and cache files
