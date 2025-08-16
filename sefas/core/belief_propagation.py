@@ -43,6 +43,9 @@ class BeliefPropagationEngine:
         self.messages: Dict[Tuple[str, str], Dict[str, float]] = defaultdict(dict)
         self.check_results: Dict[str, List[Dict]] = defaultdict(list)
         
+        # Track propagation history
+        self.propagation_history: List[Dict[str, Any]] = []
+        
     async def add_proposal(self, claim_id: str, content: str, confidence: float, agent_id: str):
         """Add a proposal from an agent"""
         if claim_id not in self.beliefs:
@@ -117,6 +120,18 @@ class BeliefPropagationEngine:
         
         # Calculate system confidence
         system_confidence = self._calculate_system_confidence()
+        
+        # Record this propagation run in history
+        propagation_record = {
+            'timestamp': asyncio.get_event_loop().time(),
+            'iterations': iteration,
+            'converged': converged,
+            'system_confidence': system_confidence,
+            'num_beliefs': len(self.beliefs),
+            'num_validations': sum(len(v) for v in self.check_results.values()),
+            'final_consensus': consensus
+        }
+        self.propagation_history.append(propagation_record)
         
         return {
             'consensus': consensus,
@@ -232,3 +247,54 @@ class BeliefPropagationEngine:
             total_weight += weight
         
         return total_conf / total_weight if total_weight > 0 else 0.0
+    
+    def get_propagation_history(self) -> List[Dict[str, Any]]:
+        """Return the history of propagation runs"""
+        return self.propagation_history.copy()
+    
+    def get_agent_performance_insights(self, proposals: List[Dict[str, Any]], beliefs: Dict[str, float]) -> Dict[str, Dict[str, Any]]:
+        """Generate performance insights for agents based on their contributions"""
+        insights = {}
+        
+        # Group proposals by agent role
+        role_performance = defaultdict(list)
+        
+        for proposal in proposals:
+            agent_role = proposal.get('agent_role', 'unknown')
+            confidence = proposal.get('confidence', 0.5)
+            
+            # Get final belief for this proposal's claim
+            claim_id = proposal.get('subclaim_id', '')
+            final_belief = beliefs.get(claim_id, 0.5)
+            
+            role_performance[agent_role].append({
+                'initial_confidence': confidence,
+                'final_belief': final_belief,
+                'agent_id': proposal.get('agent_id', 'unknown')
+            })
+        
+        # Calculate insights for each role
+        for role, performances in role_performance.items():
+            if not performances:
+                continue
+                
+            avg_initial = sum(p['initial_confidence'] for p in performances) / len(performances)
+            avg_final = sum(p['final_belief'] for p in performances) / len(performances)
+            
+            # Determine performance trend
+            if avg_final > avg_initial + 0.1:
+                trend = "improving"
+            elif avg_final < avg_initial - 0.1:
+                trend = "declining"
+            else:
+                trend = "stable"
+            
+            insights[role] = {
+                'avg_initial_confidence': avg_initial,
+                'avg_final_belief': avg_final,
+                'performance_trend': trend,
+                'proposal_count': len(performances),
+                'confidence_delta': avg_final - avg_initial
+            }
+        
+        return insights

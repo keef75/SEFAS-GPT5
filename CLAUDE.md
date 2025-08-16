@@ -220,15 +220,59 @@ ls data/reports/            # Saved execution reports (JSON format)
 3. LangChain clients read from OS environment variables
 4. Missing step 2 causes 401 errors even with valid API keys
 
+## Recent System Enhancements
+
+### Belief Propagation Engine Improvements
+**Enhanced History Tracking**: The belief propagation system now maintains comprehensive execution history with the `get_propagation_history()` method, enabling detailed evolution reporting and system performance analysis.
+
+**Key Components**:
+- **Propagation History**: Records timestamp, iterations, convergence status, system confidence, and consensus results for each propagation run
+- **Agent Performance Insights**: Analyzes agent contributions by role with confidence deltas and performance trends (improving/declining/stable)  
+- **Evolution Integration**: Full integration with evolution reporting system for fitness tracking and system optimization
+
+### Evolution Reporting System
+**Complete Evolution Tracking**: The system now provides comprehensive evolution reports via `get_evolution_report()` method in the executor, including:
+- Total executions and evolution events
+- Agent fitness scores across all 17 agents
+- Belief propagation run counts and convergence analysis
+- Evolution rate calculations and performance trends
+
+### Reliability Patterns Implementation Status
+- **✅ N-Version Programming**: Fully operational with 5-agent diversity for exponential error reduction
+- **✅ Circuit Breakers**: Complete fault isolation with automatic recovery mechanisms
+- **✅ Hedged Requests**: Tail latency reduction through concurrent execution patterns
+- **✅ Quorum Validation**: 3+ validator consensus with intelligent fallback systems
+- **✅ Belief Propagation**: LDPC-style consensus with convergence detection and confidence weighting
+
 ## Error Handling Patterns
 - **Defensive Variable Initialization**: All execution variables initialized with safe defaults before try blocks to prevent KeyError in exception handlers
 - **Enhanced Exception Handling**: System errors capture partial execution state and metrics for debugging
 - **LangSmith Integration**: Gracefully degrades when unavailable (403 Forbidden errors logged but don't halt execution)
 - **Configuration Loading**: Safe defaults for missing files and environment variables
 - **Agent Execution**: Individual agent failures don't stop system execution; partial results preserved
-- **Belief Propagation**: Safe dictionary access prevents KeyError exceptions
+- **Belief Propagation**: Safe dictionary access prevents KeyError exceptions with comprehensive history tracking
 - **CLI Handling**: Empty confidence scores and missing data handled gracefully
 - **Environment Variable Conflicts**: Shell environment variables override .env files; use `unset OPENAI_API_KEY` for troubleshooting
+
+## Common Debugging Scenarios
+
+### AttributeError: Missing Methods
+**Issue**: Missing methods in core components (e.g., `get_propagation_history()`)
+**Solution**: Check that all core components in `sefas/core/` have required methods. The belief propagation engine requires:
+- `get_propagation_history()` for evolution reporting
+- `get_agent_performance_insights()` for agent analysis
+- Proper history tracking in `propagate()` method
+
+### Evolution Report Generation Failures
+**Issue**: Evolution reports fail with missing data errors
+**Solution**: Ensure the `FederatedSystemRunner.get_evolution_report()` method can access:
+- Belief propagation history via `self.belief_engine.get_propagation_history()`
+- Agent fitness scores from `agent.evolution_state.fitness_score`
+- Execution history from `self.execution_history`
+
+### Agent Configuration Errors
+**Issue**: Agent initialization failures or missing roles
+**Solution**: Verify `config/agents.yaml` contains all 17 required agents and `sefas/core/state.py` defines corresponding `AgentRole` enum values
 
 ## Security and Git Handling
 - **API Key Protection**: `.env` file excluded via `.gitignore` to prevent sensitive data commits
