@@ -5,6 +5,7 @@ Based on Shannon's information theory and error-correcting codes.
 
 import asyncio
 import logging
+import time
 from typing import Dict, List, Optional, Tuple, Any
 from collections import defaultdict
 import numpy as np
@@ -56,7 +57,10 @@ class BeliefPropagationEngine:
         # Belief states
         self.beliefs: Dict[str, BeliefNode] = {}
         self.messages: Dict[Tuple[str, str], Dict[str, float]] = defaultdict(dict)
-        self.check_results: Dict[str, List[Dict]] = defaultdict(list)
+        
+        # CRITICAL FIX: Use keyed validator messages to prevent double-counting
+        self.validator_messages: Dict[Tuple[str, str, int], Dict[str, Any]] = {}
+        self.current_round: int = 0  # Track BP rounds
         
         # Track propagation history
         self.propagation_history: List[Dict[str, Any]] = []
@@ -87,15 +91,19 @@ class BeliefPropagationEngine:
         logger.info(f"Added proposal for {claim_id} from {agent_id}: confidence={confidence:.2f} -> {node.candidates[content]:.2f}")
     
     async def add_validation(self, claim_id: str, validator_id: str, result: Dict):
-        """Add validation result from a checker"""
-        self.check_results[claim_id].append({
-            'validator': validator_id,
+        """Add validation result - UPSERT not APPEND to prevent double-counting"""
+        # CRITICAL FIX: Key by (claim, validator, round) to prevent data corruption
+        key = (claim_id, validator_id, self.current_round)
+        
+        # Replace instead of append - this prevents double-counting validators!
+        self.validator_messages[key] = {
             'valid': result.get('valid', True),
             'confidence': result.get('confidence', 0.5),
-            'evidence': result.get('evidence', '')
-        })
+            'evidence': result.get('evidence', ''),
+            'timestamp': time.time()
+        }
         
-        logger.info(f"Added validation for {claim_id} from {validator_id}: {result.get('confidence', 0.5):.2f}")
+        logger.info(f"🚨 DATA INTEGRITY: Added validation for {claim_id} from {validator_id} (round {self.current_round}): {result.get('confidence', 0.5):.2f}")
     
     def normalize_beliefs(self):
         """Normalize probability distributions while preserving confidence relationships"""
@@ -128,6 +136,9 @@ class BeliefPropagationEngine:
         self.patience_counter = 0
         self.last_delta = float('inf')
         
+        # CRITICAL FIX: Reset round counter to prevent validator accumulation
+        self.current_round = 0
+        
         # Initial normalization
         self.normalize_beliefs()
         
@@ -142,6 +153,9 @@ class BeliefPropagationEngine:
         
         while not converged and iteration < self.max_iterations:
             old_beliefs = self._copy_beliefs()
+            
+            # CRITICAL FIX: Increment round for validator tracking
+            self.current_round = iteration
             
             # Message passing phase with damping
             await self._update_messages_with_damping(old_beliefs)
@@ -179,7 +193,7 @@ class BeliefPropagationEngine:
             'converged': converged,
             'system_confidence': system_confidence,
             'num_beliefs': len(self.beliefs),
-            'num_validations': sum(len(v) for v in self.check_results.values()),
+            'num_validations': len(self.validator_messages),  # FIXED: Use new validator structure
             'final_consensus': consensus,
             'oscillation_detected': len(self.oscillation_history) > 6 and self._detect_oscillation(),
             'final_damping': self.adaptive_damping
@@ -203,8 +217,17 @@ class BeliefPropagationEngine:
     
     async def _update_messages(self):
         """Update messages between nodes (check-to-variable and variable-to-check)"""
-        # For each validation result, propagate influence to beliefs
-        for claim_id, validations in self.check_results.items():
+        # CRITICAL FIX: Use keyed validator messages to prevent double-counting
+        # Group by claim_id for processing
+        claim_validations = defaultdict(list)
+        
+        for (claim_id, validator_id, round_num), validation_data in self.validator_messages.items():
+            # Only use validations from current or recent rounds to avoid stale data
+            if round_num >= max(0, self.current_round - 1):
+                claim_validations[claim_id].append(validation_data)
+        
+        # For each claim with validations, propagate influence to beliefs
+        for claim_id, validations in claim_validations.items():
             if claim_id not in self.beliefs:
                 continue
                 
