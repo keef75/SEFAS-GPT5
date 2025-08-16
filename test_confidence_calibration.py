@@ -17,13 +17,13 @@ async def test_confidence_calibration():
     # Test scenario: Multiple agents providing proposals for a task
     claim_id = "test_claim_1"
     
-    # Add diverse proposals with different confidence levels
+    # Add diverse proposals with different confidence levels (using legitimate proposer names)
     proposals = [
-        ("Proposal A: Use microservices architecture", 0.8, "architect_agent"),
-        ("Proposal A: Use microservices architecture", 0.7, "technical_agent"),  # Same content, different confidence
-        ("Proposal B: Use monolithic architecture", 0.6, "conservative_agent"),
-        ("Proposal A: Use microservices architecture", 0.9, "senior_agent"),  # Same content again
-        ("Proposal C: Use hybrid approach", 0.5, "hybrid_agent"),
+        ("Proposal A: Use microservices architecture", 0.8, "technical_architect"),
+        ("Proposal A: Use microservices architecture", 0.7, "proposer_beta"),  # Same content, different confidence
+        ("Proposal B: Use monolithic architecture", 0.6, "proposer_gamma"),
+        ("Proposal A: Use microservices architecture", 0.9, "domain_expert"),  # Same content again
+        ("Proposal C: Use hybrid approach", 0.5, "proposer_alpha"),
     ]
     
     print("📝 Adding proposals:")
@@ -114,8 +114,8 @@ async def test_confidence_edge_cases():
     
     # Test case 1: Very low initial confidences
     claim_id = "edge_case_1"
-    await engine.add_proposal(claim_id, "Low confidence proposal", 0.1, "uncertain_agent")
-    await engine.add_proposal(claim_id, "Another low confidence", 0.2, "doubt_agent")
+    await engine.add_proposal(claim_id, "Low confidence proposal", 0.1, "proposer_alpha")
+    await engine.add_proposal(claim_id, "Another low confidence", 0.2, "proposer_beta")
     
     # Add positive validation
     await engine.add_validation(claim_id, "validator", {"valid": True, "confidence": 0.9, "evidence": "Actually good"})
@@ -126,8 +126,8 @@ async def test_confidence_edge_cases():
     # Test case 2: High initial confidences with negative validation
     engine2 = BeliefPropagationEngine()
     claim_id2 = "edge_case_2"
-    await engine2.add_proposal(claim_id2, "High confidence proposal", 0.9, "confident_agent")
-    await engine2.add_proposal(claim_id2, "Another high confidence", 0.8, "sure_agent")
+    await engine2.add_proposal(claim_id2, "High confidence proposal", 0.9, "domain_expert")
+    await engine2.add_proposal(claim_id2, "Another high confidence", 0.8, "technical_architect")
     
     # Add negative validation
     await engine2.add_validation(claim_id2, "validator", {"valid": False, "confidence": 0.9, "evidence": "Actually problematic"})

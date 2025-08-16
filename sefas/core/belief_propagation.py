@@ -12,6 +12,13 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
+# CRITICAL FIX: Define allowed proposer agents to prevent echo bug
+ALLOWED_PROPOSERS = {
+    "proposer_alpha", "proposer_beta", "proposer_gamma",
+    "domain_expert", "technical_architect", "innovation_catalyst",
+    "strategic_planner", "orchestrator"  # orchestrator allowed for task decomposition
+}
+
 class BeliefNode(BaseModel):
     """Represents a belief state for a claim"""
     claim_id: str
@@ -56,6 +63,11 @@ class BeliefPropagationEngine:
         
     async def add_proposal(self, claim_id: str, content: str, confidence: float, agent_id: str):
         """Add a proposal from an agent"""
+        # CRITICAL FIX: Filter out non-proposer sources to prevent echo bug
+        if agent_id not in ALLOWED_PROPOSERS:
+            logger.debug(f"🚨 ECHO BUG PREVENTION: Skipping non-proposer source: {agent_id}")
+            return
+        
         if claim_id not in self.beliefs:
             self.beliefs[claim_id] = BeliefNode(claim_id=claim_id)
         
