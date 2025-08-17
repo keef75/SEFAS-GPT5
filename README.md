@@ -85,7 +85,7 @@ Imagine if Einstein, Tesla, and Feynman could collaborate in real-time, each bri
 
 ---
 
-##  **Architecture: 17-Agent Team**
+##  **Architecture: 17+1 Agent Team**
 
 <div align="center">
 
