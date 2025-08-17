@@ -190,9 +190,16 @@ class ReportSynthesizer:
         if not checker_reports:
             return verification_summary
         
+        # Enhanced verification analysis that accounts for both explicit verification_results
+        # and confidence-based validation (which is how our system actually works)
+        explicit_checks = 0
+        confidence_based_checks = 0
+        
         for report in checker_reports:
+            # Check for explicit verification results first
             if report.verification_results:
                 for check, result in report.verification_results.items():
+                    explicit_checks += 1
                     if result.get('passed', False):
                         verification_summary['passed_checks'] += 1
                     else:
@@ -206,6 +213,22 @@ class ReportSynthesizer:
                             report.issues_found
                         )
             
+            # ENHANCED: For validator agents without explicit verification_results,
+            # use confidence score as validation indicator (our actual system behavior)
+            elif 'validator' in report.agent_role.lower() or 'validation' in report.agent_id.lower():
+                confidence_based_checks += 1
+                # Consider validation passed if confidence > 0.6 and no critical issues
+                has_critical_issues = any(
+                    word in issue.lower() 
+                    for issue in report.issues_found 
+                    for word in ['critical', 'severe', 'major', 'error', 'fail']
+                )
+                
+                if report.confidence_score > 0.6 and not has_critical_issues:
+                    verification_summary['passed_checks'] += 1
+                else:
+                    verification_summary['failed_checks'] += 1
+            
             # Collect critical issues
             for issue in report.issues_found:
                 if any(word in issue.lower() for word in ['critical', 'severe', 'major']):
@@ -214,10 +237,14 @@ class ReportSynthesizer:
                         'issue': issue
                     })
         
+        # Calculate pass rate based on all validation attempts (explicit + confidence-based)
         total_checks = verification_summary['passed_checks'] + verification_summary['failed_checks']
         verification_summary['pass_rate'] = (
             verification_summary['passed_checks'] / max(total_checks, 1)
         )
+        
+        # Update total_checks to reflect actual validation attempts
+        verification_summary['total_checks'] = total_checks
         
         return verification_summary
     
@@ -468,3 +495,236 @@ class ReportSynthesizer:
             key_points = [text]
         
         return key_points
+    
+    # ==========================================
+    # NEW: Human-Readable Answer Synthesis
+    # ==========================================
+    
+    def synthesize_answer(self, json_path: str) -> str:
+        """Read JSON report and create human-readable answer
+        
+        Args:
+            json_path: Path to the JSON report file
+            
+        Returns:
+            Formatted answer string ready for display
+        """
+        try:
+            # Load JSON report
+            with open(json_path, 'r', encoding='utf-8') as f:
+                report_data = json.load(f)
+            
+            # Extract data from the nested structure
+            synthesis = report_data.get('synthesis', {})
+            summary = report_data.get('summary', {})
+            
+            # Extract key fields with safe defaults
+            task = synthesis.get('task', 'Unknown task')
+            
+            # Get consensus data
+            consensus = synthesis.get('consensus', {})
+            mean_confidence = consensus.get('mean_confidence', 0.0)
+            consensus_reached = consensus.get('consensus_reached', False)
+            
+            # Get recommendations
+            recommendations = synthesis.get('recommendations', [])
+            
+            # Get performance data
+            performance = synthesis.get('performance', {})
+            execution_time = performance.get('total_execution_time', 0.0)
+            
+            # Get agent data
+            agent_reports = report_data.get('agent_reports', [])
+            total_agents = len(agent_reports) if agent_reports else summary.get('total_agents', 0)
+            
+            # Translate confidence to human terms
+            confidence_emoji, confidence_text = self._translate_confidence(mean_confidence)
+            
+            # Filter high-confidence recommendations (>70%)
+            high_conf_recommendations = [
+                rec for rec in recommendations 
+                if rec.get('confidence', 0) > 0.7
+            ][:5]  # Limit to top 5
+            
+            # Build formatted answer
+            answer = self._format_answer(
+                task=task,
+                confidence_percent=mean_confidence * 100,
+                confidence_emoji=confidence_emoji,
+                confidence_text=confidence_text,
+                recommendations=high_conf_recommendations,
+                total_agents=total_agents,
+                consensus_reached=consensus_reached,
+                execution_time=execution_time
+            )
+            
+            return answer
+            
+        except FileNotFoundError:
+            return self._format_error_message(f"Report file not found: {json_path}")
+        except json.JSONDecodeError:
+            return self._format_error_message(f"Invalid JSON in report file: {json_path}")
+        except Exception as e:
+            return self._format_error_message(f"Error reading report: {str(e)}")
+    
+    def _translate_confidence(self, confidence: float) -> tuple:
+        """Translate numeric confidence to emoji and text
+        
+        Args:
+            confidence: Float between 0 and 1
+            
+        Returns:
+            Tuple of (emoji, text) for the confidence level
+        """
+        if confidence >= 0.8:
+            return "✅", "High"
+        elif confidence >= 0.6:
+            return "🔵", "Moderate"
+        elif confidence >= 0.4:
+            return "⚠️", "Low"
+        else:
+            return "❌", "Very Low"
+    
+    def _format_answer(
+        self,
+        task: str,
+        confidence_percent: float,
+        confidence_emoji: str,
+        confidence_text: str,
+        recommendations: List[Dict[str, Any]],
+        total_agents: int,
+        consensus_reached: bool,
+        execution_time: float
+    ) -> str:
+        """Format the complete answer string
+        
+        Args:
+            task: The original user question/task
+            confidence_percent: Confidence as percentage (0-100)
+            confidence_emoji: Emoji representing confidence level
+            confidence_text: Human-readable confidence level
+            recommendations: List of recommendation dictionaries
+            total_agents: Number of agents that analyzed the problem
+            consensus_reached: Whether consensus was achieved
+            execution_time: Time taken for analysis
+            
+        Returns:
+            Formatted answer string
+        """
+        # Header
+        answer = "=" * 60 + "\n"
+        answer += "🎯 SEFAS ANSWER TO YOUR REQUEST\n"
+        answer += "=" * 60 + "\n\n"
+        
+        # Task
+        answer += f"📋 Task: {task}\n\n"
+        
+        # Confidence Level
+        answer += f"🔍 Confidence Level: {confidence_percent:.1f}% {confidence_emoji} ({confidence_text} Confidence)\n\n"
+        
+        # Recommendations
+        if recommendations:
+            answer += "💡 Top Recommendations:\n"
+            for i, rec in enumerate(recommendations, 1):
+                rec_text = rec.get('recommendation', 'No recommendation text')
+                rec_confidence = rec.get('confidence', 0) * 100
+                # Clean up recommendation text
+                if rec_text.startswith('- '):
+                    rec_text = rec_text[2:]
+                answer += f"{i}. {rec_text}\n"
+                answer += f"   Confidence: {rec_confidence:.1f}%\n\n"
+        else:
+            answer += "💡 Top Recommendations:\n"
+            answer += "No high-confidence recommendations available (>70% threshold)\n\n"
+        
+        # Analysis Summary
+        answer += "📊 Analysis Summary:\n"
+        answer += f"• {total_agents} agents analyzed the problem\n"
+        answer += f"• Consensus: {'Reached ✅' if consensus_reached else 'Not reached ❌'}\n"
+        answer += f"• Processing time: {execution_time:.1f} seconds\n\n"
+        
+        # Footer
+        answer += "=" * 60 + "\n"
+        
+        return answer
+    
+    def _format_error_message(self, error_msg: str) -> str:
+        """Format an error message in the same style as answers"""
+        error = "=" * 60 + "\n"
+        error += "❌ SEFAS SYNTHESIS ERROR\n"
+        error += "=" * 60 + "\n\n"
+        error += f"🚨 Error: {error_msg}\n\n"
+        error += "📋 Please check that:\n"
+        error += "• The report file exists and is valid JSON\n"
+        error += "• The report was generated by SEFAS\n"
+        error += "• File permissions allow reading\n\n"
+        error += "=" * 60 + "\n"
+        return error
+    
+    def display_synthesis(self, report_paths: Dict[str, str]) -> None:
+        """Display the synthesis and save to file
+        
+        Args:
+            report_paths: Dictionary with report format as key and file path as value
+                         Expected to contain 'json' key with JSON report path
+        """
+        # Get JSON report path
+        json_path = report_paths.get('json')
+        if not json_path:
+            print("\n❌ No JSON report found for synthesis")
+            return
+        
+        # Generate synthesis
+        answer = self.synthesize_answer(json_path)
+        
+        # Display the answer
+        print("\n" + answer)
+        
+        # Save to answer file
+        self._save_answer_file(json_path, answer)
+    
+    def _save_answer_file(self, json_path: str, answer: str) -> None:
+        """Save the answer to a text file for easy sharing
+        
+        Args:
+            json_path: Path to the JSON report (used to determine answer file name)
+            answer: The formatted answer string to save
+        """
+        try:
+            # Create answer file path with human-readable task name
+            json_file = Path(json_path)
+            
+            # Extract task from the answer to create meaningful filename
+            task_name = "unknown_task"
+            try:
+                # Extract task from JSON file to create meaningful name
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    report_data = json.load(f)
+                task = report_data.get('synthesis', {}).get('task', 'unknown_task')
+                
+                # Clean task for filename (remove special characters, limit length)
+                import re
+                task_name = re.sub(r'[^\w\s-]', '', task)  # Remove special chars
+                task_name = re.sub(r'\s+', '_', task_name)  # Replace spaces with underscores
+                task_name = task_name.lower()[:50]  # Lowercase and limit to 50 chars
+                if not task_name:
+                    task_name = "unknown_task"
+            except Exception:
+                pass  # Fall back to default if extraction fails
+            
+            # Create timestamp for uniqueness
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            answer_file = f"answer_{task_name}_{timestamp}.txt"
+            answer_path = json_file.parent / answer_file
+            
+            # Save answer
+            with open(answer_path, 'w', encoding='utf-8') as f:
+                f.write(answer)
+                f.write(f"\nGenerated by SEFAS Report Synthesizer\n")
+                f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"Source Report: {json_file.name}\n")
+            
+            print(f"💾 Answer saved to: {answer_path}")
+            
+        except Exception as e:
+            print(f"⚠️ Could not save answer file: {str(e)}")
