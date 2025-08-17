@@ -20,7 +20,7 @@
 
 ---
 
-## 🦾 **Federated Agents**
+## **Federated Agents**
 
 <div align="center">
 
