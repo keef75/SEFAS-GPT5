@@ -14,7 +14,7 @@
 
 *17-Agent Network • Belief Propagation • Reliability • GPT-5*
 
-**Experience the future of collaborative artificial intelligence**
+**Collaborative artificial intelligence**
 
 </div>
 
