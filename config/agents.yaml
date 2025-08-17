@@ -11,7 +11,7 @@ agents:
   orchestrator:
     role: "orchestrator"
     name: "Central Orchestrator"
-    model: "gpt-4o-mini"  # Change to gpt-5 for more power
+    model: "gpt-5"  # Change to gpt-5 for more power
     temperature: 0.1      # Low temp for consistent task decomposition
     max_tokens: 2000
     rate_limit_ms: 1000   # Delay between calls
@@ -56,7 +56,7 @@ agents:
   task_decomposer:
     role: "task_decomposer"
     name: "Advanced Task Decomposer"
-    model: "gpt-4o-mini"
+    model: "gpt-5"
     temperature: 0.2
     max_tokens: 1500
     initial_prompt: |
@@ -80,7 +80,7 @@ agents:
   strategy_evolver:
     role: "strategy_evolver"
     name: "Adaptive Strategy Evolver"
-    model: "gpt-4o-mini"
+    model: "gpt-5"
     temperature: 0.4
     max_tokens: 1800
     initial_prompt: |
@@ -108,7 +108,7 @@ agents:
   proposer_alpha:
     role: "creative_proposer"
     name: "Alpha Creative Engine"
-    model: "gpt-4o"      # Use more powerful model for creativity
+    model: "gpt-5"      # Use more powerful model for creativity
     temperature: 0.8     # High temp for maximum creativity
     max_tokens: 2000
     strategy: "creative"
@@ -134,7 +134,7 @@ agents:
   proposer_beta:
     role: "analytical_proposer"  
     name: "Beta Analytical Engine"
-    model: "gpt-4o"
+    model: "gpt-5"
     temperature: 0.3     # Low temp for analytical precision
     max_tokens: 2000
     strategy: "analytical"
@@ -160,7 +160,7 @@ agents:
   proposer_gamma:
     role: "research_proposer"
     name: "Gamma Research Specialist"  
-    model: "gpt-4o"
+    model: "gpt-5"
     temperature: 0.5     # Balanced for research synthesis
     max_tokens: 2000
     strategy: "research"
@@ -186,7 +186,7 @@ agents:
   domain_expert:
     role: "domain_expert"
     name: "Specialized Domain Expert"
-    model: "gpt-4o"
+    model: "gpt-5"
     temperature: 0.4
     max_tokens: 2000
     specialization: "adaptive"  # Changes based on task domain
@@ -206,7 +206,7 @@ agents:
   technical_architect:
     role: "technical_architect"
     name: "System Technical Architect"
-    model: "gpt-4o"  
+    model: "gpt-5"  
     temperature: 0.3
     max_tokens: 2200
     initial_prompt: |
@@ -224,7 +224,7 @@ agents:
   innovation_catalyst:
     role: "innovation_catalyst"
     name: "Innovation Catalyst"
-    model: "gpt-4o"
+    model: "gpt-5"
     temperature: 0.7     # High creativity for innovation
     max_tokens: 1800
     initial_prompt: |
@@ -242,7 +242,7 @@ agents:
   strategic_planner:
     role: "strategic_planner"
     name: "Strategic Planning Specialist"
-    model: "gpt-4o-mini"
+    model: "gpt-5"
     temperature: 0.4
     max_tokens: 2000
     initial_prompt: |
@@ -264,7 +264,7 @@ agents:
   checker_logic:
     role: "logic_validator"
     name: "Logic Validation Engine"
-    model: "gpt-4o"
+    model: "gpt-5"
     temperature: 0.1     # Minimal temp for logical precision
     max_tokens: 1500
     initial_prompt: |
@@ -288,7 +288,7 @@ agents:
   checker_semantic:
     role: "semantic_validator"
     name: "Semantic Validation Engine"
-    model: "gpt-4o"
+    model: "gpt-5"
     temperature: 0.2
     max_tokens: 1500
     initial_prompt: |
@@ -306,7 +306,7 @@ agents:
   checker_consistency:
     role: "consistency_validator"
     name: "Consistency Validation Engine"
-    model: "gpt-4o"
+    model: "gpt-5"
     temperature: 0.1
     max_tokens: 1500
     initial_prompt: |
@@ -324,7 +324,7 @@ agents:
   quality_assurer:
     role: "quality_assurer"
     name: "Quality Assurance Specialist"
-    model: "gpt-4o-mini"
+    model: "gpt-5"
     temperature: 0.3
     max_tokens: 1800
     initial_prompt: |
@@ -342,7 +342,7 @@ agents:
   performance_optimizer:
     role: "performance_optimizer"
     name: "Performance Optimization Specialist"
-    model: "gpt-4o-mini"
+    model: "gpt-5"
     temperature: 0.4
     max_tokens: 1600
     initial_prompt: |
@@ -360,7 +360,7 @@ agents:
   risk_assessor:
     role: "risk_assessor"
     name: "Risk Assessment Specialist"
-    model: "gpt-4o-mini"
+    model: "gpt-5"
     temperature: 0.3
     max_tokens: 1700
     initial_prompt: |
@@ -378,7 +378,7 @@ agents:
   compliance_officer:
     role: "compliance_officer"
     name: "Compliance and Ethics Officer"
-    model: "gpt-4o-mini"
+    model: "gpt-5"
     temperature: 0.2
     max_tokens: 1500
     initial_prompt: |

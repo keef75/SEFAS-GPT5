@@ -72,6 +72,8 @@ class FinalReportGenerator:
 
 {synthesis['executive_summary']}
 
+{synthesis.get('human_answer', {}).get('formatted_answer', '')}
+
 ---
 
 ## 🔍 Task Decomposition
