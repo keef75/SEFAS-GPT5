@@ -23,6 +23,7 @@ from typing import Optional
 
 from sefas.workflows.executor import FederatedSystemRunner
 from sefas.monitoring.execution_reporter import execution_reporter
+from sefas.reporting.report_synthesizer import ReportSynthesizer
 
 # Allow calling as: `python scripts/run_experiment.py "task..."` (insert default command)
 KNOWN_COMMANDS = {"run", "batch", "analyze", "--help", "-h"}
@@ -77,13 +78,71 @@ def run(
         metrics_table.add_row("Consensus Reached", "✅ Yes" if consensus.get('consensus_reached', False) else "❌ No")
         metrics_table.add_row("Mean Confidence", f"{consensus.get('mean_confidence', 0.0):.2%}")
         metrics_table.add_row("Total Proposals", str(proposals.get('total_proposals', 0)))
-        metrics_table.add_row("Verification Pass Rate", f"{verification.get('pass_rate', 0.0):.1%}")
         metrics_table.add_row("Agents Evolved", str(len(evolution.get('evolved_agents', []))))
         metrics_table.add_row("Execution Time", f"{performance.get('total_execution_time', 0.0):.2f}s")
         metrics_table.add_row("Total Tokens", f"{performance.get('total_tokens_used', 0):,}")
         metrics_table.add_row("Estimated Cost", f"${performance.get('estimated_cost_usd', 0.0):.4f}")
         
         console.print(metrics_table)
+        
+        # Direct User-Friendly Answer Display - Using Available Synthesis Data
+        from rich.panel import Panel
+        
+        # Get data that's already available in synthesis
+        executive_summary = synthesis.get('executive_summary', 'Analysis completed successfully.')
+        recommendations = synthesis.get('recommendations', [])
+        mean_confidence = consensus.get('mean_confidence', 0.0)
+        consensus_reached = consensus.get('consensus_reached', False)
+        
+        # Style the confidence level
+        if mean_confidence > 0.8:
+            confidence_style = "bold green"
+            confidence_emoji = "✨"
+        elif mean_confidence > 0.6:
+            confidence_style = "bold yellow"
+            confidence_emoji = "⚡"
+        else:
+            confidence_style = "bold red"
+            confidence_emoji = "⚠️"
+        
+        # Format top recommendations
+        top_recommendations = []
+        for i, rec in enumerate(recommendations[:3], 1):
+            rec_text = rec.get('recommendation', 'No recommendation text')
+            top_recommendations.append(f"  {i}. {rec_text}")
+        
+        recommendations_text = "\n".join(top_recommendations) if top_recommendations else "  • No specific recommendations available"
+        
+        # Create the answer content using available data
+        answer_content = f"""🎯 **ANSWER TO YOUR QUESTION**
+
+❓ **Question:** {task}
+
+💡 **Analysis Summary:**
+{executive_summary}
+
+📊 **System Confidence:** {mean_confidence:.1%}
+
+💫 **Key Recommendations:**
+{recommendations_text}
+
+✅ **Consensus Status:** {'Reached - High agreement among agents' if consensus_reached else 'Partial - Agents still analyzing'}
+
+🤖 **Agent Network:** {len(synthesis.get('agent_contributions', {}))} specialized agents analyzed this request"""
+        
+        # Create prominent answer panel
+        answer_panel = Panel(
+            answer_content,
+            title=f"[bold blue]🎯 DIRECT ANSWER TO YOUR QUESTION[/bold blue]",
+            subtitle=f"[{confidence_style}]{confidence_emoji} {mean_confidence:.1%} Confidence[/{confidence_style}]",
+            border_style="blue",
+            padding=(1, 2),
+            expand=False
+        )
+        
+        console.print("\n")
+        console.print(answer_panel)
+        console.print("\n")
         
         # Agent Contributions
         agent_contributions = synthesis.get('agent_contributions', {})
@@ -133,6 +192,108 @@ def run(
             console.print("\n[bold]📄 Generated Reports:[/bold]")
             for format_type, filepath in result['reports'].items():
                 console.print(f"  • {format_type.upper()}: {filepath}")
+            
+            # Generate GPT-5 executive synthesis (independent of core system)
+            try:
+                console.print("\n[bold]🧠 Generating GPT-5 Executive Synthesis...[/bold]")
+                
+                # Import and run independent GPT-5 synthesis agent
+                import subprocess
+                import sys
+                
+                # Get the actual task ID from current run (not from filename)
+                task_id = result.get('task_id')
+                if task_id:
+                        # Run independent GPT-5 synthesis agent
+                        synthesis_cmd = [
+                            sys.executable, 
+                            "scripts/gpt5_synthesis_agent.py", 
+                            "--auto", 
+                            task_id
+                        ]
+                        
+                        # Execute synthesis in subprocess to avoid module conflicts
+                        result_synthesis = subprocess.run(
+                            synthesis_cmd, 
+                            capture_output=True, 
+                            text=True, 
+                            cwd=str(Path.cwd())  # Convert Path to string
+                        )
+                        
+                        if result_synthesis.returncode == 0:
+                            console.print("✅ [green]GPT-5 Executive Synthesis completed successfully[/green]")
+                            console.print(f"📋 [cyan]Analyzed current experiment: {task_id}[/cyan]")
+                            
+                            # Also display the GPT-5 analysis in Rich UI
+                            try:
+                                # Subprocess.run() is synchronous, so GPT-5 has completed, but give filesystem a moment to flush
+                                import time
+                                
+                                reports_dir = Path("data/reports")
+                                start_time = time.time()
+                                recent_gpt5_files = []
+                                
+                                # Poll for the file for up to 5 seconds (should be immediate, but be safe)
+                                for attempt in range(10):  # 10 attempts over 5 seconds
+                                    current_time = time.time()
+                                    
+                                    # Find GPT-5 files created in the last 60 seconds (should be from this run)
+                                    recent_gpt5_files = [
+                                        f for f in reports_dir.glob("gpt5_executive_report_*.txt")
+                                        if (current_time - f.stat().st_mtime) < 60  # Extended to 60 seconds for safety
+                                    ]
+                                    
+                                    if recent_gpt5_files:
+                                        break
+                                    
+                                    time.sleep(0.5)  # Wait 0.5 seconds between attempts
+                                
+                                if recent_gpt5_files:
+                                    # Get the most recent one from this run
+                                    latest_file = max(recent_gpt5_files, key=lambda f: f.stat().st_mtime)
+                                    console.print(f"📄 [green]Found current run report: {latest_file.name}[/green]")
+                                    
+                                    # Read and display the GPT-5 analysis
+                                    gpt5_content = latest_file.read_text(encoding='utf-8')
+                                    
+                                    # Create Rich Panel with GPT-5 content
+                                    from rich.panel import Panel
+                                    from rich.markdown import Markdown
+                                    
+                                    gpt5_panel = Panel(
+                                        Markdown(gpt5_content),
+                                        title="[bold green]🧠 GPT-5 EXECUTIVE ANALYSIS[/bold green]",
+                                        subtitle="[bold cyan]Independent Executive Assessment[/bold cyan]",
+                                        border_style="green",
+                                        padding=(1, 2),
+                                        expand=True
+                                    )
+                                    
+                                    console.print("\n")
+                                    console.print(gpt5_panel)
+                                    console.print("\n")
+                                else:
+                                    # Check if any GPT-5 files exist at all
+                                    all_gpt5_files = list(reports_dir.glob("gpt5_executive_report_*.txt"))
+                                    if all_gpt5_files:
+                                        latest_any = max(all_gpt5_files, key=lambda f: f.stat().st_mtime)
+                                        age_seconds = current_time - latest_any.stat().st_mtime
+                                        console.print(f"⚠️ [yellow]No recent GPT-5 report found after polling for 5 seconds[/yellow]")
+                                        console.print(f"📝 [dim]Latest report is {age_seconds:.1f} seconds old: {latest_any.name}[/dim]")
+                                        console.print(f"🔍 [dim]Checked {len(all_gpt5_files)} existing files[/dim]")
+                                    else:
+                                        console.print("⚠️ [yellow]No GPT-5 reports found in reports directory[/yellow]")
+                            except Exception as e:
+                                console.print(f"⚠️ [yellow]Could not display GPT-5 analysis: {e}[/yellow]")
+                        else:
+                            console.print(f"⚠️ [yellow]GPT-5 synthesis failed: {result_synthesis.stderr[:200]}[/yellow]")
+                            if result_synthesis.stdout:
+                                console.print(f"📝 Output: {result_synthesis.stdout[:300]}")
+                else:
+                    console.print("⚠️ [yellow]No task ID available for synthesis[/yellow]")
+                    
+            except Exception as e:
+                console.print(f"\n⚠️ [yellow]Could not generate GPT-5 synthesis: {str(e)}[/yellow]")
             
             # Auto-open HTML report in browser if available
             if 'html' in result['reports'] and not verbose:
