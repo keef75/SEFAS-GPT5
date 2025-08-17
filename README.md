@@ -1,4 +1,4 @@
-# 🚀 SEFAS - Self-Evolving Federated Agent System by Cocoa AI Research
+# SEFAS - Self-Evolving Federated Agent System by Cocoa AI Research
 
 <div align="center">
 
