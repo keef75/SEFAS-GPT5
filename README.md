@@ -10,7 +10,7 @@
 [![LangChain](https://img.shields.io/badge/LangChain-integrated-green?style=flat-square&logo=chainlink)](https://langchain.com/)
 [![LangSmith](https://img.shields.io/badge/LangSmith-monitoring-blue?style=flat-square)](https://smith.langchain.com/)
 
-**🌟 Cocoa AI Multi-Agent System 🌟**
+**Multi-Agent System**
 
 *17-Agent Network • Belief Propagation • Reliability • GPT-5*
 
