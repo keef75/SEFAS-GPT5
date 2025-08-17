@@ -48,10 +48,10 @@ class ReportSynthesizer:
         # Categorize reports by role
         orchestrator_reports = [r for r in agent_reports if 'orchestrator' in r.agent_role.lower()]
         proposer_reports = [r for r in agent_reports if 'proposer' in r.agent_role.lower()]
-        checker_reports = [r for r in agent_reports if 'checker' in r.agent_role.lower()]
+        checker_reports = [r for r in agent_reports if 'checker' in r.agent_role.lower() or 'validator' in r.agent_role.lower()]
         specialist_reports = [r for r in agent_reports 
                              if not any(role in r.agent_role.lower() 
-                                      for role in ['orchestrator', 'proposer', 'checker'])]
+                                      for role in ['orchestrator', 'proposer', 'checker', 'validator'])]
         
         # Extract key insights
         synthesis = {
@@ -79,6 +79,11 @@ class ReportSynthesizer:
             
             # AI-Generated Executive Summary
             "executive_summary": self._generate_executive_summary(
+                task, agent_reports, execution_metadata
+            ),
+            
+            # Human-Friendly Answer
+            "human_answer": self._safe_generate_human_friendly_answer(
                 task, agent_reports, execution_metadata
             ),
             
@@ -215,7 +220,10 @@ class ReportSynthesizer:
             
             # ENHANCED: For validator agents without explicit verification_results,
             # use confidence score as validation indicator (our actual system behavior)
-            elif 'validator' in report.agent_role.lower() or 'validation' in report.agent_id.lower():
+            elif ('validator' in report.agent_role.lower() or 
+                  'validation' in report.agent_id.lower() or
+                  'checker_' in report.agent_id.lower() or
+                  any(keyword in report.agent_id.lower() for keyword in ['logic validation', 'semantic validation', 'consistency validation'])):
                 confidence_based_checks += 1
                 # Consider validation passed if confidence > 0.6 and no critical issues
                 has_critical_issues = any(
@@ -440,6 +448,162 @@ class ReportSynthesizer:
         """
         
         return summary.strip()
+    
+    def _safe_generate_human_friendly_answer(
+        self,
+        task: str,
+        agent_reports: List[AgentReport],
+        execution_metadata: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Safe wrapper for human-friendly answer generation"""
+        try:
+            return self._generate_human_friendly_answer(task, agent_reports, execution_metadata)
+        except Exception as e:
+            print(f"WARNING: Human-friendly answer generation failed: {e}")
+            # Return a simple fallback
+            return {
+                "question": task,
+                "confidence": 0.0,
+                "key_findings": [],
+                "recommendations": [],
+                "verification_status": {"pass_rate": 0.0, "total_checks": 0},
+                "formatted_answer": f"""
+========================================
+🎯 ANSWER TO YOUR QUESTION
+========================================
+
+❓ Question: {task}
+
+💡 Answer: Analysis in progress...
+
+========================================
+"""
+            }
+    
+    def _generate_human_friendly_answer(
+        self,
+        task: str,
+        agent_reports: List[AgentReport],
+        execution_metadata: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Generate human-friendly Q&A format answer"""
+        
+        if not agent_reports:
+            return {
+                "question": task,
+                "answer": "Analysis in progress - please wait for agent completion.",
+                "confidence": 0.0,
+                "key_findings": [],
+                "recommendations": [],
+                "verification_status": {"pass_rate": 0.0, "total_checks": 0},
+                "formatted_answer": f"""
+========================================
+🎯 ANSWER TO YOUR QUESTION
+========================================
+
+❓ Question: {task}
+
+💡 Answer: System is analyzing your request with multiple specialized agents. 
+Please wait for the complete analysis to finish.
+
+🔄 Status: Agents are processing your request...
+
+========================================
+"""
+            }
+        
+        # Gather analysis data
+        consensus = self._analyze_consensus(agent_reports)
+        proposals = self._analyze_proposals([r for r in agent_reports if 'proposer' in r.agent_role.lower()])
+        verification = self._analyze_verification([r for r in agent_reports if 'checker' in r.agent_role.lower()])
+        
+        confidence = consensus.get('mean_confidence', 0.0)
+        
+        # Extract key insights from top proposals
+        best_proposals = proposals.get('best_proposals', [])
+        top_recommendations = []
+        
+        # Get top 3-5 recommendations from highest confidence agents
+        all_recommendations = []
+        for report in agent_reports:
+            for rec in report.recommendations:
+                all_recommendations.append({
+                    'text': rec,
+                    'confidence': report.confidence_score,
+                    'agent': report.agent_id
+                })
+        
+        # Sort and get top recommendations
+        all_recommendations.sort(key=lambda x: x['confidence'], reverse=True)
+        top_recommendations = all_recommendations[:5]
+        
+        # Format the answer
+        formatted_answer = f"""
+========================================
+🎯 ANSWER TO YOUR QUESTION
+========================================
+
+❓ Question: {task}
+
+💡 Answer ({confidence:.1%} confidence):
+Based on our federated analysis with {len(agent_reports)} specialized agents:
+"""
+        
+        # Add key findings if we have good proposals
+        if best_proposals and len(best_proposals) > 0:
+            formatted_answer += f"""
+🔍 **Key Findings:**
+"""
+            for i, proposal in enumerate(best_proposals[:3], 1):
+                summary = proposal.get('summary', 'Analysis provided')
+                if len(summary) > 100:
+                    summary = summary[:97] + "..."
+                formatted_answer += f"   {i}. {summary}\n"
+        
+        # Add recommendations if available
+        if top_recommendations:
+            formatted_answer += f"""
+💡 **Recommended Actions:**
+"""
+            for i, rec in enumerate(top_recommendations[:4], 1):
+                rec_text = rec['text']
+                if len(rec_text) > 80:
+                    rec_text = rec_text[:77] + "..."
+                formatted_answer += f"   {i}. {rec_text}\n"
+        
+        # Add verification status
+        if verification.get('total_checks', 0) > 0:
+            pass_rate = verification.get('pass_rate', 0.0)
+            status_emoji = "✅" if pass_rate > 0.8 else "⚠️" if pass_rate > 0.6 else "❌"
+            formatted_answer += f"""
+{status_emoji} **Verification Status:** {pass_rate:.1%} validation pass rate
+"""
+        
+        # Add confidence note
+        if confidence < 0.7:
+            formatted_answer += f"""
+⚠️ Note: Moderate confidence level ({confidence:.1%}) - consider additional analysis
+"""
+        elif confidence > 0.85:
+            formatted_answer += f"""
+✨ High confidence analysis ({confidence:.1%}) - strong consensus achieved
+"""
+        
+        formatted_answer += """
+========================================
+"""
+        
+        return {
+            "question": task,
+            "confidence": confidence,
+            "key_findings": [p.get('summary', '') for p in (best_proposals[:3] if best_proposals else [])],
+            "recommendations": [r['text'] for r in (top_recommendations[:4] if top_recommendations else [])],
+            "verification_status": {
+                "pass_rate": verification.get('pass_rate', 0.0),
+                "total_checks": verification.get('total_checks', 0)
+            },
+            "formatted_answer": formatted_answer.strip()
+        }
     
     def _compile_recommendations(self, agent_reports: List[AgentReport]) -> List[Dict[str, str]]:
         """Compile all recommendations from agents"""

@@ -108,11 +108,6 @@ async def run_with_comprehensive_reports(task: str = None):
                 "🟢 Good" if proposals.get('total_proposals', 0) > 5 else "🟡 Fair" if proposals.get('total_proposals', 0) > 2 else "🔴 Limited"
             )
             metrics_table.add_row(
-                "Verification", "Pass Rate", 
-                f"{verification.get('pass_rate', 0.0):.1%}",
-                "🟢 High" if verification.get('pass_rate', 0.0) > 0.8 else "🟡 Med" if verification.get('pass_rate', 0.0) > 0.6 else "🔴 Low"
-            )
-            metrics_table.add_row(
                 "Evolution", "Agents Evolved", 
                 str(len(evolution.get('evolved_agents', []))),
                 "🟢 Active" if len(evolution.get('evolved_agents', [])) > 0 else "🟡 Stable"
@@ -124,6 +119,65 @@ async def run_with_comprehensive_reports(task: str = None):
             )
             
             console.print(metrics_table)
+            
+            # Direct User-Friendly Answer Display - Using Available Synthesis Data
+            from rich.panel import Panel
+            
+            # Get data that's already available in synthesis
+            executive_summary = synthesis.get('executive_summary', 'Analysis completed successfully.')
+            recommendations = synthesis.get('recommendations', [])
+            mean_confidence = consensus.get('mean_confidence', 0.0)
+            consensus_reached = consensus.get('consensus_reached', False)
+            
+            # Style the confidence level
+            if mean_confidence > 0.8:
+                confidence_style = "bold green"
+                confidence_emoji = "✨"
+            elif mean_confidence > 0.6:
+                confidence_style = "bold yellow"
+                confidence_emoji = "⚡"
+            else:
+                confidence_style = "bold red"
+                confidence_emoji = "⚠️"
+            
+            # Format top recommendations
+            top_recommendations = []
+            for i, rec in enumerate(recommendations[:3], 1):
+                rec_text = rec.get('recommendation', 'No recommendation text')
+                top_recommendations.append(f"  {i}. {rec_text}")
+            
+            recommendations_text = "\n".join(top_recommendations) if top_recommendations else "  • No specific recommendations available"
+            
+            # Create the answer content using available data
+            answer_content = f"""🎯 **ANSWER TO YOUR QUESTION**
+
+❓ **Question:** {task}
+
+💡 **Analysis Summary:**
+{executive_summary}
+
+📊 **System Confidence:** {mean_confidence:.1%}
+
+💫 **Key Recommendations:**
+{recommendations_text}
+
+✅ **Consensus Status:** {'Reached - High agreement among agents' if consensus_reached else 'Partial - Agents still analyzing'}
+
+🤖 **Agent Network:** {len(synthesis.get('agent_contributions', {}))} specialized agents analyzed this request"""
+            
+            # Create prominent answer panel
+            answer_panel = Panel(
+                answer_content,
+                title=f"[bold blue]🎯 DIRECT ANSWER TO YOUR QUESTION[/bold blue]",
+                subtitle=f"[{confidence_style}]{confidence_emoji} {mean_confidence:.1%} Confidence[/{confidence_style}]",
+                border_style="blue",
+                padding=(1, 2),
+                expand=False
+            )
+            
+            console.print("\n")
+            console.print(answer_panel)
+            console.print("\n")
             
             # Agent Performance Analysis
             agent_contributions = synthesis.get('agent_contributions', {})
