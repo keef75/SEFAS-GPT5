@@ -137,7 +137,7 @@ graph TB
 
 </div>
 
-### **Meet AI Team**
+### **Digital Team**
 
 #### **Layer 1: Strategic Command** (The Generals)
 - **🎭 Orchestrator** - *The conductor of the AI symphony, coordinating all 17 agents*
